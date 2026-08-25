@@ -1,0 +1,609 @@
+import os
+import json
+import base64
+from typing import Optional
+
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+CLIENT_ID = "560972362497-qu8i9jjp9hu6smvnj3nslt93eg0h091e.apps.googleusercontent.com"
+CLIENT_SECRET = "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"
+
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+]
+
+CREDENTIAL_FILE = r"C:\Users\ragha\Downloads\LUCY\LucyPython\cred.json"
+WANTED_HEADERS = {
+    "from",
+    "to",
+    "cc",
+    "subject",
+    "date",
+    "reply-to",
+    "return-path",
+}
+
+
+# ============================================================
+# OAUTH
+# ============================================================
+
+def save_credentials(creds: Credentials) -> bool:
+    """Save Google OAuth credentials to disk."""
+
+    try:
+        with open(CREDENTIAL_FILE, "w", encoding="utf-8") as file:
+            file.write(creds.to_json())
+
+        return True
+
+    except OSError as error:
+        print(f"Failed to save credentials: {error}")
+        return False
+
+    except Exception as error:
+        print(f"Unexpected error while saving credentials: {error}")
+        return False
+
+
+def run_new_oauth_flow() -> Optional[Credentials]:
+    """
+    Run Google's OAuth flow.
+
+    This is used:
+    - the first time the program runs
+    - if the refresh token expires
+    - if the refresh token gets revoked
+    - if cred.json becomes unusable
+    """
+
+    client_config = {
+        "installed": {
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": ["http://localhost"],
+        }
+    }
+
+    try:
+        flow = InstalledAppFlow.from_client_config(
+            client_config,
+            SCOPES,
+        )
+
+        creds = flow.run_local_server(
+            port=0,
+            access_type="offline",
+            prompt="consent",
+        )
+
+        if not creds:
+            print("OAuth authorization returned no credentials.")
+            return None
+
+        if not save_credentials(creds):
+            print("OAuth succeeded, but credentials could not be saved.")
+
+        print("Google authorization successful.")
+
+        return creds
+
+    except Exception as error:
+        print(f"OAuth authorization failed: {error}")
+        return None
+
+
+def load_credentials() -> Optional[Credentials]:
+    """Load credentials from cred.json."""
+
+    if not os.path.exists(CREDENTIAL_FILE):
+        print("Credential file does not exist.")
+        return None
+
+    try:
+        return Credentials.from_authorized_user_file(
+            CREDENTIAL_FILE,
+            SCOPES,
+        )
+
+    except (ValueError, KeyError, json.JSONDecodeError) as error:
+        print(f"Credential file is invalid: {error}")
+        return None
+
+    except OSError as error:
+        print(f"Could not read credential file: {error}")
+        return None
+
+    except Exception as error:
+        print(f"Unexpected credential loading error: {error}")
+        return None
+
+
+def get_credentials() -> Optional[Credentials]:
+    """
+    Return valid Google credentials.
+
+    Handles:
+    - missing cred.json
+    - expired access token
+    - revoked/expired refresh token
+    - corrupt credential file
+    - missing refresh token
+    """
+
+    creds = load_credentials()
+
+    # No credentials at all
+    if creds is None:
+        print("No usable credentials found. Starting authorization.")
+        return run_new_oauth_flow()
+
+    # Already valid
+    if creds.valid:
+        return creds
+
+    # Access token expired but refresh token exists
+    if creds.expired and creds.refresh_token:
+
+        try:
+            print("Access token expired. Refreshing...")
+
+            creds.refresh(Request())
+
+            if not creds.valid:
+                print("Token refresh completed but credentials remain invalid.")
+                return run_new_oauth_flow()
+
+            save_credentials(creds)
+
+            print("Access token refreshed successfully.")
+
+            return creds
+
+        except RefreshError as error:
+            # Refresh token itself may have expired/revoked
+            print(f"Refresh token is no longer usable: {error}")
+            print("Starting authorization again.")
+
+            return run_new_oauth_flow()
+
+        except Exception as error:
+            print(f"Unexpected token refresh error: {error}")
+            return None
+
+    # Credentials invalid with no usable refresh token
+    print("Credentials are invalid and cannot be refreshed.")
+    print("Starting authorization again.")
+
+    return run_new_oauth_flow()
+
+
+# ============================================================
+# GMAIL SERVICE
+# ============================================================
+
+def create_gmail_service(creds: Credentials):
+    """Create an authenticated Gmail API service."""
+
+    try:
+        return build(
+            "gmail",
+            "v1",
+            credentials=creds,
+            cache_discovery=False,
+        )
+
+    except Exception as error:
+        print(f"Failed to create Gmail service: {error}")
+        return None
+
+
+# ============================================================
+# MESSAGE BODY
+# ============================================================
+
+def decode_body(data: str) -> Optional[str]:
+    """Decode Gmail's base64url encoded message body."""
+
+    if not data:
+        return None
+
+    try:
+        return base64.urlsafe_b64decode(data).decode(
+            "utf-8",
+            errors="replace",
+        )
+
+    except (ValueError, TypeError) as error:
+        print(f"Could not decode message body: {error}")
+        return None
+
+    except Exception as error:
+        print(f"Unexpected body decoding error: {error}")
+        return None
+
+
+def get_message_body(msg: dict) -> Optional[str]:
+    """
+    Extract the most readable plain-text body from a Gmail message.
+    """
+
+    try:
+        payload = msg.get("payload", {})
+
+        # Non-multipart email
+        direct_data = payload.get("body", {}).get("data")
+
+        if direct_data:
+            return decode_body(direct_data)
+
+        # Multipart email
+        def walk(parts) -> Optional[str]:
+
+            try:
+                for part in parts:
+
+                    mime_type = part.get("mimeType", "")
+                    body = part.get("body", {})
+                    data = body.get("data")
+
+                    if mime_type == "text/plain" and data:
+                        decoded = decode_body(data)
+
+                        if decoded:
+                            return decoded
+
+                    nested_parts = part.get("parts", [])
+
+                    if nested_parts:
+                        result = walk(nested_parts)
+
+                        if result:
+                            return result
+
+                return None
+
+            except Exception as error:
+                print(f"Failed while walking email parts: {error}")
+                return None
+
+        return walk(payload.get("parts", []))
+
+    except Exception as error:
+        print(f"Failed to extract message body: {error}")
+        return None
+
+
+# ============================================================
+# HEADERS
+# ============================================================
+
+def clean_return_path(value: str) -> str:
+    """
+    Convert something like:
+
+    <abc123@mail.payments.interac.ca>
+
+    into:
+
+    mail.payments.interac.ca
+    """
+
+    try:
+        value = value.strip()
+
+        if "@" not in value:
+            return value
+
+        domain = value.rsplit("@", 1)[-1]
+
+        return domain.strip("<> ")
+
+    except Exception:
+        return value
+
+
+def get_useful_headers(msg: dict) -> dict:
+    """Return only useful email headers."""
+
+    try:
+        headers = msg.get("payload", {}).get("headers", [])
+
+        useful_headers = {}
+
+        for header in headers:
+
+            try:
+                name = header.get("name")
+                value = header.get("value")
+
+                if not name or value is None:
+                    continue
+
+                if name.lower() not in WANTED_HEADERS:
+                    continue
+
+                # Normalize header names
+                clean_name = name.lower()
+
+                if clean_name == "return-path":
+                    value = clean_return_path(value)
+                    clean_name = "mailed-by"
+
+                useful_headers[clean_name] = value
+
+            except Exception as error:
+                print(f"Failed to parse individual header: {error}")
+
+        return useful_headers
+
+    except Exception as error:
+        print(f"Failed to extract email headers: {error}")
+        return {}
+
+
+# ============================================================
+# GMAIL SEARCH
+# ============================================================
+
+def search_messages(
+    gmail_service,
+    query: str,
+    max_results: int = 10,
+) -> list:
+    """Search Gmail and return matching message references."""
+
+    try:
+        response = (
+            gmail_service
+            .users()
+            .messages()
+            .list(
+                userId="me",
+                q=query,
+                maxResults=max_results,
+            )
+            .execute()
+        )
+
+        return response.get("messages", [])
+
+    except HttpError as error:
+        print(f"Gmail search failed: {error}")
+        return []
+
+    except Exception as error:
+        print(f"Unexpected Gmail search error: {error}")
+        return []
+
+
+def get_full_message(
+    gmail_service,
+    message_id: str,
+) -> Optional[dict]:
+    """Download the full Gmail message."""
+
+    try:
+        return (
+            gmail_service
+            .users()
+            .messages()
+            .get(
+                userId="me",
+                id=message_id,
+                format="full",
+            )
+            .execute()
+        )
+
+    except HttpError as error:
+        print(
+            f"Failed to retrieve message "
+            f"{message_id}: {error}"
+        )
+        return None
+
+    except Exception as error:
+        print(
+            f"Unexpected error retrieving message "
+            f"{message_id}: {error}"
+        )
+        return None
+
+
+# ============================================================
+# FORMAT MESSAGE
+# ============================================================
+
+def parse_message(msg: dict) -> dict:
+    """Turn a raw Gmail API message into clean readable data."""
+
+    try:
+        return {
+            "id": msg.get("id"),
+            "thread_id": msg.get("threadId"),
+            "labels": msg.get("labelIds", []),
+            "headers": get_useful_headers(msg),
+            "body": get_message_body(msg),
+        }
+
+    except Exception as error:
+        print(f"Failed to parse message: {error}")
+
+        return {
+            "id": msg.get("id"),
+            "thread_id": msg.get("threadId"),
+            "labels": [],
+            "headers": {},
+            "body": None,
+        }
+
+
+def print_message(email: dict) -> None:
+    """Print an email in a clean human-readable format."""
+
+    try:
+        print("\n" + "=" * 70)
+
+        headers = email.get("headers", {})
+
+        for name, value in headers.items():
+            print(f"{name}: {value}")
+
+        labels = email.get("labels", [])
+
+        if labels:
+            print(f"labels: {', '.join(labels)}")
+
+        print("-" * 70)
+
+        body = email.get("body")
+
+        if body:
+            print(body.strip())
+        else:
+            print("[No readable text body]")
+
+        print("=" * 70)
+
+    except Exception as error:
+         print(f"Failed to print message: {os.error}")
+
+
+# ============================================================
+# MAIN HANDLER
+# ============================================================
+
+
+class SetupFailure(Exception):
+    pass
+
+
+def setup_gmail():
+         creds = get_credentials()
+         if creds is None:
+                  print("Could not obtain valid credentials.")
+                  return
+
+         gmail_service = create_gmail_service(creds)
+
+         if gmail_service is None:
+                  print("Could not initialize Gmail.")
+                  return
+         
+         return gmail_service
+
+
+def main_handler(
+    action: str,
+    query: str = None,
+    count: int = 5
+) -> None:
+
+
+    try:
+        # ----------------------------------------
+        # Setup (authenticate, create service)
+        # ----------------------------------------
+        service = setup_gmail()
+        
+        if service is None:
+            raise SetupFailure()
+
+        # ----------------------------------------
+        # SEARCH EMAILS
+        # ----------------------------------------
+
+        if action == "search":
+
+            if not query:
+                raise ValueError("Search action requires a query")
+
+            messages = search_messages(
+                service,
+                query=query,
+                max_results=count,
+            )
+
+            if not messages:
+                print("No messages found.")
+                return
+
+        # ----------------------------------------
+        # GET LATEST EMAILS
+        # ----------------------------------------
+
+        elif action == "latest":
+
+            messages = search_messages(
+                service,
+                query="",
+                max_results=count,
+            )
+
+            if not messages:
+                print("No messages found.")
+                return
+
+        # ----------------------------------------
+        # INVALID ACTION
+        # ----------------------------------------
+        else:
+            raise ValueError(
+                f"Unknown gmail action: {action}"
+            )
+
+        # ----------------------------------------
+        # Retrieve + parse
+        # ----------------------------------------
+
+        for message in messages:
+
+            message_id = message.get("id")
+
+            if not message_id:
+                print("Message result had no ID. Skipping.")
+                continue
+
+            msg = get_full_message(
+                service,
+                message_id,
+            )
+
+            if msg is None:
+                continue
+
+            email = parse_message(msg)
+
+            print_message(email)
+
+    except SetupFailure as error:
+        print(f"Gmail Setup failed")
+
+    except KeyboardInterrupt:
+        print("\nOperation cancelled.")
+
+    except Exception as error:
+        print(f"Fatal unexpected error: {error}")
+
+
+action = input("Specify the action (search/latest) and press Enter to continue: ").strip().lower()
+
+if action == "search":
+    query = input("Enter the search query: ")
+    main_handler(action=action, query=query)
+elif action == "latest":
+    main_handler(action=action)

@@ -1,0 +1,1 @@
+﻿$dest = "$env:LOCALAPPDATA\Microsoft\WindowsApps\es.exe"; Invoke-WebRequest -Uri "https://www.voidtools.com/ES-1.1.0.37.x64.zip" -OutFile "$env:TEMP\es.zip"; Expand-Archive -Path "$env:TEMP\es.zip" -DestinationPath "$env:TEMP\es_extracted" -Force; Move-Item "$env:TEMP\es_extracted\es.exe" $dest -Force

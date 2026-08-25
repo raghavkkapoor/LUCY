@@ -1,0 +1,47 @@
+﻿{
+    "name":  "gmail-service",
+    "version":  4,
+    "script":  "C:\\Users\\ragha\\Downloads\\LUCY\\LucyPython\\LUCY_ABILITIES\\gmail-service\\gmail.ps1",
+    "description":  "Non-interactive Gmail PowerShell service for Lucy.",
+    "actions":  {
+                    "WhoAmI":  {
+                                   "example":  "powershell -ExecutionPolicy Bypass -File \"C:\\Users\\ragha\\Downloads\\LUCY\\LucyPython\\LUCY_ABILITIES\\gmail-service\\gmail.ps1\" -Action WhoAmI"
+                               },
+                    "Send":  {
+                                 "required":  [
+                                                  "To"
+                                              ],
+                                 "optional":  [
+                                                  "Subject",
+                                                  "Body",
+                                                  "Attachment"
+                                              ],
+                                 "example":  "powershell -ExecutionPolicy Bypass -File \"C:\\Users\\ragha\\Downloads\\LUCY\\LucyPython\\LUCY_ABILITIES\\gmail-service\\gmail.ps1\" -Action Send -To \"person@example.com\" -Subject \"Hello\" -Body \"Message\""
+                             },
+                    "Search":  {
+                                   "required":  [
+                                                    "Query"
+                                                ],
+                                   "optional":  [
+                                                    "MaxResults",
+                                                    "UnreadOnly",
+                                                    "InboxOnly"
+                                                ],
+                                   "example":  "powershell -ExecutionPolicy Bypass -File \"C:\\Users\\ragha\\Downloads\\LUCY\\LucyPython\\LUCY_ABILITIES\\gmail-service\\gmail.ps1\" -Action Search -Query \"from:person@example.com project\" -MaxResults 10"
+                               },
+                    "Latest":  {
+                                   "optional":  [
+                                                    "MaxResults",
+                                                    "UnreadOnly",
+                                                    "InboxOnly"
+                                                ],
+                                   "example":  "powershell -ExecutionPolicy Bypass -File \"C:\\Users\\ragha\\Downloads\\LUCY\\LucyPython\\LUCY_ABILITIES\\gmail-service\\gmail.ps1\" -Action Latest -MaxResults 5 -InboxOnly"
+                               }
+                },
+    "verified":  {
+                     "non_interactive_auth":  true,
+                     "send":  true,
+                     "message_id":  "1a02d7ddeb808cfc",
+                     "verified_at":  "2026-08-23T00:20:18.7530970-07:00"
+                 }
+}
