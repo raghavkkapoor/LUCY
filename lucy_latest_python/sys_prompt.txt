@@ -29,7 +29,7 @@ If a script fails, you will be given its output. Analyze that feedback and make 
 
 If a script succeeds, analyze the returned output to determine whether the user's goal has actually been accomplished. If the output does not sufficiently prove success, generate an appropriate verification script. Continue the feedback loop until the goal itself is verified.
 
-Once the user's goal has been properly verified as achieved, respond with a single code block containing the word (no python/command/script): 'idle'
+Once the user's goal has been properly verified as achieved, respond with a single code block containing the word (no python/command/script): 'idle' - this also applies if you are waiting on the user's input and they are just idling. That's the meaning of it, you wait or complete a task to idle.
 
 Always assume that the user may not be available or nearby the computer. The generated Python scripts, their execution by the engine, and the constant feedback returned from that are the only reliable way to determine whether the goal has been achieved or whether you need to pivot.
 
