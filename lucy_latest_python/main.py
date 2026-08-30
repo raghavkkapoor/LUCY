@@ -6,7 +6,7 @@ import time
 import subprocess
 import urllib.request
 from pathlib import Path
-
+from lucy_logging import log, LogColors
 from playwright.sync_api import sync_playwright
 
 
@@ -110,7 +110,7 @@ def connect_to_gemini(p):
     # Reuse an already-open Gemini tab if one exists.
     for existing_page in context.pages:
         try:
-            if existing_page.url.startswith("https://gemini.google.com"):
+            if existing_page.url.startswith(GEMINI_GEM_URL):
                 page = existing_page
                 break
         except Exception:
@@ -342,17 +342,9 @@ def extract_latest_code(page):
 def run_python(script_content):
     try:
         if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(
-                encoding="utf-8",
-                errors="replace"
-            )
-
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         if hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(
-                encoding="utf-8",
-                errors="replace"
-            )
-
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
@@ -371,9 +363,7 @@ def run_python(script_content):
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
 
-        print(
-            f"{YELLOW}Running latest command...{RESET}"
-        )
+        print(f"{YELLOW}Running latest command...{RESET}")
 
         MAX_COMMAND_RUNTIME = 300          # Hard limit: 5 minutes
         STATUS_CHECK_INTERVAL = 5          # Check every 5 seconds
@@ -385,7 +375,8 @@ def run_python(script_content):
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             text=True,
-            encoding="utf-8"
+            encoding="utf-8",
+            env=env
         )
 
         start_time = time.monotonic()
@@ -410,13 +401,7 @@ def run_python(script_content):
 
                     try:
                         subprocess.run(
-                            [
-                                "taskkill",
-                                "/F",
-                                "/T",
-                                "/PID",
-                                str(proc.pid),
-                            ],
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             timeout=10,
@@ -431,7 +416,6 @@ def run_python(script_content):
 
                     raise TimeoutError(
                         f"COMMAND_TIMEOUT=True\n"
-                        f"COMMAND_RUNTIME_SECONDS={elapsed:.1f}\n"
                         f"COMMAND_PID={proc.pid}\n"
                         f"The Python command exceeded the maximum "
                         f"runtime of {MAX_COMMAND_RUNTIME} seconds and "
@@ -457,19 +441,14 @@ def run_python(script_content):
 
                 time.sleep(0.25)
 
+            # Gather final process output ONCE
             raw_output = proc.communicate()[0] or ""
 
         except Exception:
             if proc.poll() is None:
                 try:
                     subprocess.run(
-                        [
-                            "taskkill",
-                            "/F",
-                            "/T",
-                            "/PID",
-                            str(proc.pid),
-                        ],
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         timeout=10,
@@ -479,36 +458,51 @@ def run_python(script_content):
                         proc.kill()
                     except Exception:
                         pass
-
             raise
 
+        # Decode output
         if isinstance(raw_output, bytes):
-            output = raw_output.decode(
-                "utf-8",
-                errors="replace"
-            )
+            output_str = raw_output.decode("utf-8", errors="replace")
         else:
-            output = str(raw_output)
+            output_str = str(raw_output)
 
-        output = output.replace(
-            "\x00",
-            ""
-        ).strip()
+        output_str = output_str.replace("\x00", "").strip()
+        exit_code = proc.returncode
 
-        if not output:
-            output = (
-                "COMMAND_EXIT_CODE="
-                + str(proc.returncode)
+        # CASE 1: SCRIPT FAILED (Exit Code != 0)
+        if exit_code != 0:
+            error_type = "UnknownError"
+            line_num = "Unknown"
+
+            tb_lines = output_str.splitlines()
+
+            # Parse traceback output for Line Number and Error Type
+            for line in reversed(tb_lines):
+                if line.strip() and not line.startswith(" ") and ":" in line:
+                    error_type = line.split(":")[0].strip()
+                    break
+
+            for line in tb_lines:
+                if 'File "' in line and 'line ' in line:
+                    try:
+                        line_num = line.split('line ')[1].split(',')[0].strip()
+                    except IndexError:
+                        pass
+
+            return (
+                f"EXECUTION_STATUS=FAILED\n"
+                f"COMMAND_EXIT_CODE={exit_code}\n"
+                f"ERROR_TYPE={error_type}\n"
+                f"ERROR_LINE={line_num}\n"
+                f"FULL_TRACEBACK:\n{output_str}"
             )
-        else:
-            output = (
-                "COMMAND_EXIT_CODE="
-                + str(proc.returncode)
-                + "\n"
-                + output
-            )
 
-        return output
+        # CASE 2: SCRIPT SUCCEEDED (Exit Code == 0)
+        return (
+            f"EXECUTION_STATUS=SUCCESS\n"
+            f"COMMAND_EXIT_CODE=0\n"
+            f"STDOUT_OUTPUT:\n{output_str if output_str else '[No print output generated]'}"
+        )
 
     finally:
         try:
@@ -516,7 +510,6 @@ def run_python(script_content):
                 os.remove(command_file)
         except OSError:
             pass
-
 
 def build_initial_message(sys_prompt, user_request):
     return (
@@ -543,16 +536,6 @@ def safe_loop_call(function, *args, **kwargs):
 
 def main():
     if not require_cdp():
-        return
-
-    try:
-        sys_prompt = load_sys_prompt()
-
-    except Exception as error:
-        print(
-            f"{RED}ERROR: Could not load sys_prompt.txt: "
-            f"{error}{RESET}"
-        )
         return
 
     request = input(

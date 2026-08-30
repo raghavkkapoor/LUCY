@@ -392,7 +392,42 @@ Hardware target:
 
 ```text
 [FILL IN]
+
 ```
+
+## Search Grounding
+
+Lucy should use **search grounding** for LLMs whenever possible when factual information is required.
+
+When a task depends on facts that may be unknown, current, changing, or externally verifiable, Lucy should ground the LLM's reasoning in relevant search results rather than relying solely on the model's internal knowledge.
+
+```text
+User request
+     ↓
+Does the task require factual information?
+     ↓
+Search grounding
+     ↓
+Relevant sources
+     ↓
+LLM reasoning grounded in retrieved facts
+     ↓
+Action / response
+```
+
+Search grounding should be preferred for:
+
+* Current information
+* Web research
+* Product or service information
+* Software documentation
+* News
+* Changing facts
+* Information the model is uncertain about
+* Tasks where factual accuracy matters
+
+The objective is to reduce hallucinations and allow Lucy to reason from **retrieved, verifiable information** whenever practical.
+
 
 ---
 
