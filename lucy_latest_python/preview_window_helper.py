@@ -12,6 +12,11 @@ SWP_NOACTIVATE = 0x0010
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
 
+# Extended Window Styles (GWL_EXSTYLE)
+WS_EX_TOOLWINDOW = 0x00000080
+# Window Styles (GWL_STYLE)
+WS_MAXIMIZEBOX   = 0x00010000
+
 user32 = ctypes.windll.user32
 
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -47,7 +52,7 @@ def make_process_window_click_through(process_pid: int):
         # Get existing window styles
         current_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         # Apply click-through and layered styles
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current_style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current_style | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_MAXIMIZEBOX)
 
         # Fetch total screen dimensions
         screen_width = user32.GetSystemMetrics(SM_CXSCREEN)

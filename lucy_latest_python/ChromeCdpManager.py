@@ -5,8 +5,9 @@ import socket
 import subprocess
 import time
 import urllib.request
-from lucy_logging import log, LogColors
+from Utils.lucy_logging import log, LogColors
 from preview_window_helper import make_process_window_click_through
+from Utils.Constants import GEMINI_GEM_URL
 
 def is_cdp_port_active(port):
     """Utility to test if a CDP endpoint is responsive on a given port."""
@@ -119,7 +120,7 @@ def launch_lucy_chrome(preferred_port=9223):
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile_dir}",
         "--profile-directory=Default",
-        "--app=https://example.com" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
+        f"--app={GEMINI_GEM_URL}" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
     ]
     
     proc = subprocess.Popen(args)
@@ -137,7 +138,7 @@ def launch_lucy_chrome(preferred_port=9223):
         raise RuntimeError("Chrome launched, but CDP failed to become available.")
 
     # turn into preview window for now
-    make_process_window_click_through(proc.pid)
+    # make_process_window_click_through(proc.pid)
 
     # 6. Save state file
     state = {

@@ -10,6 +10,9 @@ import json
 import requests
 from lucy_tts import speak
 
+
+# sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
+
 # Persistent global namespace for the runner environment
 RUNNER_GLOBALS = {
     "speak": speak,

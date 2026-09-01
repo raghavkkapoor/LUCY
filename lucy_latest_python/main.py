@@ -1,232 +1,360 @@
-import sys
 import time
-from pathlib import Path
-from playwright.sync_api import sync_playwright, Error as PlaywrightError
+from playwright.sync_api import expect, sync_playwright, Error as PlaywrightError
 from ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
-from lucy_logging import log, LogColors
+from Utils.lucy_logging import log, LogColors
 from concurrent.futures import ProcessPoolExecutor, TimeoutError
-import task_runner  # Pre-loads imports on process initialization
+import task_runner
+import Utils.Constants as Constants
+from better_sys_prompt import system_instruction, user_prompt_prefix
 
+def run_python_code(script_content: str, max_runtime: float = 300.0) -> str:
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(task_runner.execute_code, script_content)
 
-# Configuration
-PORT = 9223
-GEMINI_GEM_URL = "https://gemini.google.com/gem/9cbc7f7cf497"
-SCRIPT_DIR = Path(__file__).resolve().parent
-
-CYAN, GREEN, YELLOW, RED, GRAY, RESET = (
-    "\033[96m", "\033[92m", "\033[93m", "\033[91m", "\033[90m", "\033[0m"
-)
-
-
-
-
-
-class ProcessPoolPythonExecutor:
-    """Handles isolated Python script execution via ProcessPoolExecutor."""
-
-    @staticmethod
-    def run(script_content: str, max_runtime: float = 300.0) -> str:
-        with ProcessPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(task_runner.execute_code, script_content)
-            try:
-                return future.result(timeout=max_runtime)
-            except TimeoutError:
-                return (
-                    f"EXECUTION_STATUS=FAILED\n"
-                    f"COMMAND_EXIT_CODE=124\n"
-                    f"ERROR_TYPE=TimeoutError\n"
-                    f"ERROR_LINE=Unknown\n"
-                    f"FULL_TRACEBACK:\nCommand exceeded max runtime of {max_runtime}s."
-                )
-
-
-
-
-
-
-
-class GeminiController:
-    """Manages Playwright interaction with the Gemini web interface."""
-    
-    def __init__(self, p, endpoint_url):
-        self.p = p
-        self.endpoint_url = endpoint_url
-        self.browser = None
-        self.context = None
-        self.page = None
-        self.connect()
-
-    def connect(self):
-        print(f"{YELLOW}Connecting to CDP...{RESET}")
-        self.browser = self.p.chromium.connect_over_cdp(self.endpoint_url, no_defaults=True)
-        self.context = self.browser.contexts[0]
-        
-        # 1. Fallback to waiting for existing targets if pages list is initially empty
-        if not self.context.pages:
-            self.context.wait_for_event("page")
-
-        # 2. Grab the primary page (the existing window instance)
-        self.page = self.context.pages[0]
-
-
-        # 3. Navigate if it isn't already at the target URL
-        if not self.page.url.startswith(GEMINI_GEM_URL):
-            self.page.goto(GEMINI_GEM_URL, wait_until="domcontentloaded")
-            
-        self.page.emulate_media(color_scheme="light")
-        print(f"{GREEN}Connected to Gemini.{RESET}")
-
-        #TODO ADJUST PAGE ZOOM FOR THE COMPRESSED PREVIEW WINDOW WHEN LUCY IS PERFORMING WEB RELATED TASKS
-        
-        zoom = self.page.evaluate("""() => {
-            document.body.style.zoom = 0.3
-            const rawZoom = window.getComputedStyle(document.body).zoom;
-            return rawZoom ? parseFloat(rawZoom) : 1.0;
-        }""")
-
-        print(f"Current page zoom: {zoom}")
-
-
-    def reconnect(self):
-        print(f"{RED}Target closed. Attempting recovery...{RESET}")
-        if not is_cdp_port_active(PORT):
-            raise RuntimeError(f"Port {PORT} unavailable.")
-        self.connect()
-
-    def _is_generating(self):
         try:
-            return self.page.locator('button[aria-label="Stop response"], button.stop-generating-button').first.is_visible()
-        except PlaywrightError:
-            raise
+            return future.result(timeout=max_runtime)
 
-    def wait_for_ready(self):
-        while self._is_generating():
-            time.sleep(0.5)
+        except TimeoutError:
+            return (
+                f"EXECUTION_STATUS=FAILED\n"
+                f"COMMAND_EXIT_CODE=124\n"
+                f"ERROR_TYPE=TimeoutError\n"
+                f"ERROR_LINE=Unknown\n"
+                f"FULL_TRACEBACK:\n"
+                f"Command exceeded max runtime of {max_runtime}s."
+            )
 
-    def send_request(self, request):
-        self.page.bring_to_front()
-        self.wait_for_ready()
-        
-        composer = self.page.locator('div.new-input-ui.ql-editor, div.ql-editor[contenteditable="true"]').first
-        composer.wait_for(state="visible", timeout=30000)
-        
-        composer.click(force=True)
-        self.page.keyboard.press("Control+A")
-        self.page.keyboard.press("Backspace")
-        self.page.keyboard.insert_text(request)
 
-        btn = self.page.locator('button.send-button, button[aria-label*="Send"], button[aria-label*="Submit"]').first
-        btn.wait_for(state="visible", timeout=30000)
+def connect_to_gemini(p, endpoint_url):
+    log(f"Connecting to Gemini at {endpoint_url}...", LogColors.YELLOW)
 
-        for _ in range(3):
-            btn.click(force=True)
-            self.page.wait_for_timeout(750)
-            if not composer.inner_text().strip():
-                return
-            composer.click(force=True)
-            self.page.wait_for_timeout(250)
+    try:
+        browser = p.chromium.connect_over_cdp(
+            endpoint_url,
+            no_defaults=True
+        )
 
-        composer.click(force=True)
-        self.page.keyboard.press("Enter")
-        self.page.wait_for_timeout(750)
-        if composer.inner_text().strip():
-            raise RuntimeError("Failed to submit request via UI.")
+    except Exception:
+        chrome_state = launch_lucy_chrome(preferred_port=Constants.PORT)
+        endpoint_url = chrome_state["url"]
 
-    def extract_code(self):
-        self.wait_for_ready()
-        self.page.wait_for_timeout(1000)
-        
-        turns = self.page.locator('message-content, model-response, div.model-response, .response-container')
-        if turns.count() == 0:
-            raise RuntimeError("No model response found.")
+        browser = p.chromium.connect_over_cdp(
+            endpoint_url,
+            no_defaults=True
+        )
+
+    context = browser.contexts[0]
+
+    if not context.pages:
+        context.wait_for_event("page")
+
+    page = context.pages[0]
+
+    if not page.url.startswith(Constants.GEMINI_GEM_URL):
+        page.goto(
+            Constants.GEMINI_GEM_URL,
+            wait_until="domcontentloaded"
+        )
+
+    page.wait_for_timeout(5000) # give the page some time to load and render the UI elements
+
+    log(f"Connected to LLM.", LogColors.GREEN)
+
+    system_prompt_exists = (page.get_by_text("Your goal for this convo is simple: plan, build, and test Python scripts to complete the user's goal.").count() > 0)
+
+    if not system_prompt_exists:
+        send_request(
+            page,
+            f"{system_instruction}"
+        )
+
+        page.wait_for_timeout(5000)
+
+        log(f"Preloaded system instructions.", LogColors.GREEN)
+    else:
+        log(f"Skipped preloading system instructions. They already exist in context.", LogColors.CYAN)
+
+    return {
+        "browser": browser,
+        "context": context,
+        "page": page,
+        "endpoint_url": endpoint_url
+    }
+
+
+def reconnect(playwright_instance):
+    log(f"LLM NOT FOUND:", LogColors.RED)
+    state = None
+    if not is_cdp_port_active(Constants.PORT):
+        log("Browser not found. Attempting hard recovery...", LogColors.YELLOW)
+        chrome_state = launch_lucy_chrome(
+            preferred_port=Constants.PORT
+        )
+
+        endpoint_url = chrome_state["url"]
+
+        state = connect_to_gemini(
+            playwright_instance,
+            endpoint_url
+        )
+    else:
+        log("LLM context not found. Attempting soft recovery...", LogColors.YELLOW)
+        endpoint_url = f"http://127.0.0.1:{Constants.PORT}"
+        state = connect_to_gemini(
+            playwright_instance,
+            endpoint_url
+        )
+
+    if not state:
+        log(
+            f"Recovery failed. Please restart the application.",
+            LogColors.RED
+        )
+        exit(1)
+
+    return state
+
+
+def is_generating(page):
+    return page.get_by_role("button", name="Stop response").first.is_visible()
+
+
+def wait_for_ready(page):
+    while is_generating(page):
+        time.sleep(0.8)
+
+
+def send_request(page, request):
+
+    wait_for_ready(page)
+
+    composer = page.locator("rich-textarea .ql-editor").first
+    composer.wait_for(
+        state="visible",
+        timeout=30000
+    )
+
+    composer.focus()
+    composer.fill(request)
+
+
+    composer.evaluate("""el => {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }""")
+
+    button = page.locator(
+        'button.send-button, '
+        'button[aria-label*="Send"], '
+        'button[aria-label*="Submit"]'
+    ).first
+
+
+    button.wait_for(state="visible", timeout=30000)
+    
+    # 3. Force click via DOM if standard click fails in background
+    try:
+        button.click(timeout=3000)
+    except Exception:
+        button.evaluate("btn => btn.click()")
+
+    # 4. Fallback verification
+    try:
+        expect(composer).to_be_empty(timeout=5000)
+    except AssertionError:
+        composer.press("Enter")
+        expect(composer).to_be_empty(
+            timeout=5000, 
+            message="Failed to submit request via UI."
+        )
+
+
+def extract_code(page):
+    wait_for_ready(page)
+
+    turns = page.locator('message-content, model-response, div.model-response, .response-container')
+    if turns.count() == 0:
+        raise RuntimeError("No model response found.")
             
-        newest = turns.nth(turns.count() - 1)
-        blocks = newest.locator("pre code, code-block code")
+    newest = turns.nth(turns.count() - 1)
+    blocks = newest.locator("pre code, code-block code")
         
-        if blocks.count() == 0:
-            blocks = newest.locator("code")
+    if blocks.count() == 0:
+        blocks = newest.locator("code")
             
-        if blocks.count() == 0:
-            return None
-        if blocks.count() > 1:
-            raise RuntimeError("Returned multiple code blocks.")
-            
-        return blocks.first.inner_text(timeout=30000).strip()
+    if blocks.count() == 0:
+        raise RuntimeError(
+            "No code block found."
+        )
+
+    if blocks.count() > 1:
+        raise RuntimeError(
+            "Returned multiple code blocks. Only 1 is supported."
+        )
+
+    return blocks.first.inner_text(
+        timeout=30000
+    ).strip()
+
+
+def handle_result(code):
+    if code.lower().strip().strip('"').strip("'") == "idle":
+        return None
+
+    return run_python_code(code)
 
 
 def main():
     try:
-        chrome_state = launch_lucy_chrome(preferred_port=PORT)
+        chrome_state = launch_lucy_chrome(
+            preferred_port=Constants.PORT
+        )
+
         endpoint_url = chrome_state["url"]
+
     except Exception as e:
-        log(f"Failed to init Chrome: {e}", LogColors.RED)
+        log(
+            f"Failed to init Chrome: {e}",
+            LogColors.RED
+        )
         return
 
-    if not is_cdp_port_active(PORT):
-        print(f"{RED}Browser unreachable. Exiting.{RESET}")
-        return
 
-    initial_request = input("Enter a task/goal to achieve: ").strip()
-    if not initial_request:
+    if not is_cdp_port_active(Constants.PORT):
+        log(
+            f"Browser unreachable. Exiting.",
+            LogColors.RED
+        )
         return
 
     with sync_playwright() as p:
-        try:
-            gemini = GeminiController(p, endpoint_url)
-        except Exception as e:
-            print(f"{RED}Connection error: {e}{RESET}")
+        state = connect_to_gemini(
+            p,
+            endpoint_url
+        )
+
+
+        initial_request = input(
+            "Enter a task/goal to achieve: "
+        ).strip()
+
+        if not initial_request:
             return
 
-        request = initial_request
+        request =  f"{user_prompt_prefix}{initial_request}"
 
         while True:
             try:
-                if not is_cdp_port_active(PORT):
-                    print(f"{RED}Browser died. Exiting.{RESET}")
-                    break
+                if not is_cdp_port_active(Constants.PORT):
+                   state = reconnect(p)
 
-                if not request or not request.strip():
-                    request = "No execution output was captured. Try again."
+                if not request.strip():
+                    request = (
+                        "No execution output was captured. "
+                        "Try again."
+                    )
 
-                gemini.send_request(request)
-                print(f"{GREEN}Request sent.{RESET}")
+                send_request(
+                    state["page"],
+                    request
+                )
 
-                code = gemini.extract_code()
-                
-                if not code:
-                    print(f"{YELLOW}No code found.{RESET}")
-                    request = "Return exactly one Python code block and nothing else."
-                    continue
+                log(
+                    f"Request sent.",
+                    LogColors.GREEN
+                )
 
-                if code.lower().strip().strip('"').strip("'") == "idle":
-                    print(f"{GRAY}Goal completed. Idling...{RESET}")
-                    request = input("Enter next task: ").strip()
-                    if not request:
+
+                code = extract_code(
+                    state["page"]
+                )
+
+
+                if code.lower().strip() == "idle":
+
+                    log(
+                        f"Job Finished. Idling...",
+                        LogColors.GRAY
+                    )
+
+                    check_for_next_request = input(
+                        "Enter next task: "
+                    ).strip()
+
+                    if not check_for_next_request:
                         break
+
+                    request = f"{user_prompt_prefix}{check_for_next_request}"
+
                     continue
 
-                request = ProcessPoolPythonExecutor.run(code)
 
-                print(f"{CYAN}OUTPUT:\n{request}\n{RESET}")
+                request = run_python_code(code)
+
+                log(
+                    f"OUTPUT:\n{request}",
+                    LogColors.CYAN
+                )
+                time.sleep(2)
+
 
             except PlaywrightError as e:
+
                 if "closed" in str(e).lower():
+
                     try:
-                        gemini.reconnect()
-                        request = initial_request # Reset to baseline or handle context reload
+                        state = reconnect(
+                            p,
+                            state
+                        )
+
+                        request = initial_request
+
                     except Exception as fatal:
-                        print(f"{RED}Recovery failed: {fatal}{RESET}")
-                        time.sleep(2)
+
+                        log(
+                            f"Recovery failed: {fatal}",
+                            LogColors.RED
+                        )
                 else:
-                    request = f"Playwright Engine Error: {e}"
-            
+
+                    request = (
+                        f"Playwright Engine Error: {e}"
+                    )
+
+
             except KeyboardInterrupt:
-                print(f"{RED}\nInterrupted by user.{RESET}")
+
+                log(
+                    f"Interrupted by user.",
+                    LogColors.RED
+                )
+
+                p.stop()
                 break
-                
+
             except Exception as e:
-                print(f"{RED}Loop error caught: {e}{RESET}")
-                request = f"The execution engine encountered this error:\n{str(e)}"
+
+                log(
+                    f"Loop error caught: {e}",
+                    LogColors.RED
+                )
+
+                request = (
+                    "The execution engine encountered this error:\n"
+                    f"{str(e)}"
+                )
+
+                time.sleep(2)
+                continue
+
 
 if __name__ == "__main__":
     main()
+
+
+# saving this shit for later
+# number of user sent prompts (how many messages we sent)
+# page.locator("user-query-content").count()
+
+
