@@ -1,0 +1,426 @@
+{
+  "url": "https://www.photopea.com/",
+  "title": "Photopea | Online Photo Editor",
+  "focus_sequence": [
+    {
+      "step": 0,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 578,
+        "y": 351,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 1,
+      "element": {
+        "tag": "A",
+        "text": "40 other formats",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 27,
+        "y": 353,
+        "w": 437,
+        "h": 44
+      }
+    },
+    {
+      "step": 2,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 133,
+        "y": 556,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 3,
+      "element": {
+        "tag": "A",
+        "text": "Remove background with one click",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 472,
+        "y": 729,
+        "w": 256,
+        "h": 21
+      }
+    },
+    {
+      "step": 4,
+      "element": {
+        "tag": "A",
+        "text": "replace any part of an image",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 472,
+        "y": 705,
+        "w": 443,
+        "h": 44
+      }
+    },
+    {
+      "step": 5,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 578,
+        "y": 350,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 6,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 133,
+        "y": 538,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 7,
+      "element": {
+        "tag": "A",
+        "text": "support@photopea.com",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 222,
+        "y": 680,
+        "w": 179,
+        "h": 21
+      }
+    },
+    {
+      "step": 8,
+      "element": {
+        "tag": "A",
+        "text": "Privacy Policy",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 414,
+        "y": 680,
+        "w": 101,
+        "h": 21
+      }
+    },
+    {
+      "step": 9,
+      "element": {
+        "tag": "A",
+        "text": "Twitter",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 526,
+        "y": 680,
+        "w": 52,
+        "h": 21
+      }
+    },
+    {
+      "step": 10,
+      "element": {
+        "tag": "A",
+        "text": "Facebook",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 591,
+        "y": 680,
+        "w": 69,
+        "h": 21
+      }
+    },
+    {
+      "step": 11,
+      "element": {
+        "tag": "A",
+        "text": "Reddit",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 673,
+        "y": 680,
+        "w": 48,
+        "h": 21
+      }
+    },
+    {
+      "step": 12,
+      "element": {
+        "tag": "BODY",
+        "text": "Photopea Learn Tutorials Templates API Free Online Photo Editor Unlock your creativity with the best",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 8,
+        "y": -2302,
+        "w": 927,
+        "h": 3044
+      }
+    },
+    {
+      "step": 13,
+      "element": {
+        "tag": "A",
+        "text": "Learn",
+        "aria": null,
+        "title": "Learn photo editing",
+        "role": null,
+        "x": 261,
+        "y": 26,
+        "w": 38,
+        "h": 21
+      }
+    },
+    {
+      "step": 14,
+      "element": {
+        "tag": "A",
+        "text": "Tutorials",
+        "aria": null,
+        "title": "Graphics tutorials",
+        "role": null,
+        "x": 323,
+        "y": 26,
+        "w": 59,
+        "h": 21
+      }
+    },
+    {
+      "step": 15,
+      "element": {
+        "tag": "A",
+        "text": "Templates",
+        "aria": null,
+        "title": "Free PSD templates",
+        "role": null,
+        "x": 406,
+        "y": 26,
+        "w": 69,
+        "h": 21
+      }
+    },
+    {
+      "step": 16,
+      "element": {
+        "tag": "A",
+        "text": "API",
+        "aria": null,
+        "title": "Insert a photo editor into your product",
+        "role": null,
+        "x": 500,
+        "y": 26,
+        "w": 23,
+        "h": 21
+      }
+    },
+    {
+      "step": 17,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 356,
+        "y": 327,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 18,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 578,
+        "y": 351,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 19,
+      "element": {
+        "tag": "A",
+        "text": "40 other formats",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 27,
+        "y": 353,
+        "w": 437,
+        "h": 44
+      }
+    },
+    {
+      "step": 20,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 133,
+        "y": 556,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 21,
+      "element": {
+        "tag": "A",
+        "text": "Remove background with one click",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 472,
+        "y": 729,
+        "w": 256,
+        "h": 21
+      }
+    },
+    {
+      "step": 22,
+      "element": {
+        "tag": "A",
+        "text": "replace any part of an image",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 472,
+        "y": 705,
+        "w": 443,
+        "h": 44
+      }
+    },
+    {
+      "step": 23,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 578,
+        "y": 350,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 24,
+      "element": {
+        "tag": "BUTTON",
+        "text": "Start using Photopea",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 133,
+        "y": 538,
+        "w": 232,
+        "h": 49
+      }
+    },
+    {
+      "step": 25,
+      "element": {
+        "tag": "A",
+        "text": "support@photopea.com",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 222,
+        "y": 680,
+        "w": 179,
+        "h": 21
+      }
+    },
+    {
+      "step": 26,
+      "element": {
+        "tag": "A",
+        "text": "Privacy Policy",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 414,
+        "y": 680,
+        "w": 101,
+        "h": 21
+      }
+    },
+    {
+      "step": 27,
+      "element": {
+        "tag": "A",
+        "text": "Twitter",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 526,
+        "y": 680,
+        "w": 52,
+        "h": 21
+      }
+    },
+    {
+      "step": 28,
+      "element": {
+        "tag": "A",
+        "text": "Facebook",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 591,
+        "y": 680,
+        "w": 69,
+        "h": 21
+      }
+    },
+    {
+      "step": 29,
+      "element": {
+        "tag": "A",
+        "text": "Reddit",
+        "aria": null,
+        "title": null,
+        "role": null,
+        "x": 673,
+        "y": 680,
+        "w": 48,
+        "h": 21
+      }
+    }
+  ]
+}

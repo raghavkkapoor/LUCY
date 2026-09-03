@@ -1,0 +1,441 @@
+{
+  "status": "success",
+  "url": "https://www.photopea.com/",
+  "title": "Photopea | Online Photo Editor",
+  "controls": [
+    {
+      "i": 0,
+      "tag": "A",
+      "text": "Learn",
+      "aria": null,
+      "title": "Learn photo editing",
+      "role": null,
+      "type": null,
+      "href": "//www.photopea.com/learn",
+      "tabindex": null
+    },
+    {
+      "i": 1,
+      "tag": "A",
+      "text": "Tutorials",
+      "aria": null,
+      "title": "Graphics tutorials",
+      "role": null,
+      "type": null,
+      "href": "//www.photopea.com/tuts",
+      "tabindex": null
+    },
+    {
+      "i": 2,
+      "tag": "A",
+      "text": "Templates",
+      "aria": null,
+      "title": "Free PSD templates",
+      "role": null,
+      "type": null,
+      "href": "//www.photopea.com/templates",
+      "tabindex": null
+    },
+    {
+      "i": 3,
+      "tag": "A",
+      "text": "API",
+      "aria": null,
+      "title": "Insert a photo editor into your product",
+      "role": null,
+      "type": null,
+      "href": "//www.photopea.com/api",
+      "tabindex": null
+    },
+    {
+      "i": 4,
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": null,
+      "tabindex": null
+    },
+    {
+      "i": 5,
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": null,
+      "tabindex": null
+    },
+    {
+      "i": 6,
+      "tag": "A",
+      "text": "40 other formats",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "//github.com/photopea/photopea?tab=readme-ov-file#supported-formats",
+      "tabindex": null
+    },
+    {
+      "i": 7,
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": null,
+      "tabindex": null
+    },
+    {
+      "i": 8,
+      "tag": "A",
+      "text": "Remove background with one click",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "//x.com/photopeacom/status/1735723561950539852/video/1",
+      "tabindex": null
+    },
+    {
+      "i": 9,
+      "tag": "A",
+      "text": "replace any part of an image",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "//x.com/photopeacom/status/1661425407944425494/video/1",
+      "tabindex": null
+    },
+    {
+      "i": 10,
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": null,
+      "tabindex": null
+    },
+    {
+      "i": 11,
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": null,
+      "tabindex": null
+    },
+    {
+      "i": 12,
+      "tag": "A",
+      "text": "support@photopea.com",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "mailto:support@photopea.com",
+      "tabindex": null
+    },
+    {
+      "i": 13,
+      "tag": "A",
+      "text": "Privacy Policy",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "/privacy.html",
+      "tabindex": null
+    },
+    {
+      "i": 14,
+      "tag": "A",
+      "text": "Twitter",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "//x.com/photopeacom",
+      "tabindex": null
+    },
+    {
+      "i": 15,
+      "tag": "A",
+      "text": "Facebook",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "//facebook.com/photopea/",
+      "tabindex": null
+    },
+    {
+      "i": 16,
+      "tag": "A",
+      "text": "Reddit",
+      "aria": null,
+      "title": null,
+      "role": null,
+      "type": null,
+      "href": "//reddit.com/r/photopea/",
+      "tabindex": null
+    }
+  ],
+  "keyboard_focus_order": [
+    {
+      "tag": "A",
+      "text": "Learn",
+      "aria": null,
+      "title": "Learn photo editing",
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Tutorials",
+      "aria": null,
+      "title": "Graphics tutorials",
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Templates",
+      "aria": null,
+      "title": "Free PSD templates",
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "API",
+      "aria": null,
+      "title": "Insert a photo editor into your product",
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "40 other formats",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Remove background with one click",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "replace any part of an image",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "support@photopea.com",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Privacy Policy",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Twitter",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Facebook",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Reddit",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BODY",
+      "text": "Photopea Learn Tutorials Templates API Free Online Photo Editor Unlock your creativity with the best",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Learn",
+      "aria": null,
+      "title": "Learn photo editing",
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Tutorials",
+      "aria": null,
+      "title": "Graphics tutorials",
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Templates",
+      "aria": null,
+      "title": "Free PSD templates",
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "API",
+      "aria": null,
+      "title": "Insert a photo editor into your product",
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "40 other formats",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Remove background with one click",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "replace any part of an image",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "support@photopea.com",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Privacy Policy",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Twitter",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Facebook",
+      "aria": null,
+      "title": null,
+      "role": null
+    },
+    {
+      "tag": "A",
+      "text": "Reddit",
+      "aria": null,
+      "title": null,
+      "role": null
+    }
+  ]
+}

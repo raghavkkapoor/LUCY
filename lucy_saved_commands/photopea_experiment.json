@@ -1,0 +1,130 @@
+{
+  "status": "success",
+  "experiment": "Photopea New Document UI discovery",
+  "title": "Photopea | Online Photo Editor",
+  "url": "https://www.photopea.com/",
+  "modal_controls": [
+    {
+      "tag": "DIV",
+      "text": "Photopea Learn Tutorials Templates API\nFree Online Photo Editor\nUnlock your creativity with the best",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Photopea Learn Tutorials Templates API",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Fully Local\n\nThere are no uploads. Photopea runs on your device, using your CPU and your GPU. All fi",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Fully Local\n\nThere are no uploads. Photopea runs on your device, using your CPU and your GPU. All fi",
+      "aria": null,
+      "title": null,
+      "cls": "pair"
+    },
+    {
+      "tag": "DIV",
+      "text": "Fully Local\n\nThere are no uploads. Photopea runs on your device, using your CPU and your GPU. All fi",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Professional Editor\n\nPhotopea offers a full suite of editing tools, from basic features like croppin",
+      "aria": null,
+      "title": null,
+      "cls": "pair"
+    },
+    {
+      "tag": "DIV",
+      "text": "Professional Editor\n\nPhotopea offers a full suite of editing tools, from basic features like croppin",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "State-of-the-art AI\n\nRemove background with one click, or replace any part of an image with a new co",
+      "aria": null,
+      "title": null,
+      "cls": "pair"
+    },
+    {
+      "tag": "DIV",
+      "text": "State-of-the-art AI\n\nRemove background with one click, or replace any part of an image with a new co",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Social Media Enthusiasts\n\nEnhance your photos before sharing them on platforms like Instagram, Faceb",
+      "aria": null,
+      "title": null,
+      "cls": "pair"
+    },
+    {
+      "tag": "DIV",
+      "text": "Social Media Enthusiasts\n\nEnhance your photos before sharing them on platforms like Instagram, Faceb",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Start using Photopea",
+      "aria": null,
+      "title": null,
+      "cls": ""
+    }
+  ],
+  "editor_state": {
+    "title": "Photopea | Online Photo Editor",
+    "url": "https://www.photopea.com/",
+    "canvasCount": 0,
+    "svgCount": 0,
+    "visibleInputs": 0,
+    "bodyTextLength": 2776,
+    "hasEditorIndicators": false
+  },
+  "screenshot": "C:\\Users\\ragha\\OneDrive\\Desktop\\LUCY\\lucy_saved_commands\\photopea_experiment.png"
+}
