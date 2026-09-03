@@ -7,6 +7,90 @@ import task_runner
 import Utils.Constants as Constants
 from better_sys_prompt import system_instruction, user_prompt_prefix
 
+
+def get_or_signin_gemini_page(context):
+    # Ensure at least one page is available
+    if not context.pages:
+        page = context.wait_for_event("page")
+    else:
+        page = context.pages[0]
+
+    # Playwright supports navigating directly to chrome:// URLs on CDP-connected instances
+    page.goto("chrome://settings/people", wait_until="domcontentloaded")
+
+    # Check if the "Sign in to Chrome" button exists on the initial page
+    sign_in_button = page.get_by_role("button", name="Sign in to Chrome")
+
+    if sign_in_button.is_visible(timeout=3000):
+        # Trigger sign-in popup or tab
+        with context.expect_page() as new_page_info:
+            sign_in_button.click(timeout=5000)
+        
+        auth_page = new_page_info.value
+
+        # Fill Email
+        email_input = auth_page.get_by_role("textbox", name="Email or phone")
+        email_input.wait_for(state="visible", timeout=30000)
+        email_input.fill("forpwindows@gmail.com")
+        auth_page.get_by_role("button", name="Next").click(timeout=30000)
+
+        page.wait_for_timeout(1000)
+
+        # Fill Password
+        password_input = auth_page.get_by_role("textbox", name="Enter your password")
+        password_input.wait_for(state="visible", timeout=30000)
+        password_input.fill("Access4me")
+        auth_page.get_by_role("button", name="Next").click(timeout=30000)
+
+        page.wait_for_timeout(1000)
+
+        # Close every tab except the first, then navigate the first tab to x.
+        pages = context.pages
+        if pages:
+            for tab in pages[1:]:
+                tab.close()
+
+    # Navigate to Gemini Gem URL on the primary page
+    if not page.url.startswith(Constants.GEMINI_GEM_URL):
+        page.goto(Constants.GEMINI_GEM_URL, wait_until="domcontentloaded")
+
+
+    # picking the right model
+    DEFAULT_MODEL = "3.6 flash"
+
+    model_picker_btn = page.get_by_role("button", name="Open mode picker, currently")
+
+    selected_model = model_picker_btn.inner_text().strip()
+    if not DEFAULT_MODEL.lower() in selected_model.lower():
+        model_picker_btn.click(timeout=5000)
+        menu = page.locator('[data-test-id="gem-mode-menu"]')
+        elements = menu.locator('*')
+        count = elements.count()
+
+        for i in range(count):
+            element = elements.nth(i)
+
+            if element.is_visible():
+                is_pointer = element.evaluate(
+                    "(el) => getComputedStyle(el).cursor === 'pointer'"
+                )
+
+                if is_pointer:
+                    text = element.inner_text().strip()
+
+                    if DEFAULT_MODEL.lower() in text.lower():
+                        element.click(timeout=5000)
+
+    page.wait_for_timeout(1000)
+    selected_model = model_picker_btn.inner_text().strip()
+    if not DEFAULT_MODEL.lower() in selected_model.lower():
+        log(f"Couldn't select your choice of model. Defaulting to {selected_model}", LogColors.RED)
+    else:
+        log(f"Selected model {DEFAULT_MODEL}.", LogColors.GREEN)
+
+    return page
+    
+
 def run_python_code(script_content: str, max_runtime: float = 300.0) -> str:
     with ProcessPoolExecutor(max_workers=1) as executor:
         future = executor.submit(task_runner.execute_code, script_content)
@@ -45,16 +129,7 @@ def connect_to_gemini(p, endpoint_url):
 
     context = browser.contexts[0]
 
-    if not context.pages:
-        context.wait_for_event("page")
-
-    page = context.pages[0]
-
-    if not page.url.startswith(Constants.GEMINI_GEM_URL):
-        page.goto(
-            Constants.GEMINI_GEM_URL,
-            wait_until="domcontentloaded"
-        )
+    page = get_or_signin_gemini_page(context)
 
     page.wait_for_timeout(5000) # give the page some time to load and render the UI elements
 
@@ -303,11 +378,7 @@ def main():
                 if "closed" in str(e).lower():
 
                     try:
-                        state = reconnect(
-                            p,
-                            state
-                        )
-
+                        state = reconnect(p)
                         request = initial_request
 
                     except Exception as fatal:
