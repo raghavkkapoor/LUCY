@@ -1,431 +1,189 @@
-import time
-from playwright.sync_api import expect, sync_playwright, Error as PlaywrightError
-from ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
-from Utils.lucy_logging import log, LogColors
-from concurrent.futures import ProcessPoolExecutor, TimeoutError
-import task_runner
-import Utils.Constants as Constants
-from better_sys_prompt import system_instruction, user_prompt_prefix
+import ctypes
+import customtkinter as ctk
+import keyboard
+from Utils.lucy_command_search import process_input
 
+APP_BG_COLOR = "#04082D"
 
-def get_or_signin_gemini_page(context):
-    # Ensure at least one page is available
-    if not context.pages:
-        page = context.wait_for_event("page")
-    else:
-        page = context.pages[0]
+def load_local_font(font_path):
+    """Dynamically loads a .ttf font into the Windows session memory."""
+    FR_PRIVATE = 0x10
+    ctypes.windll.gdi32.AddFontResourceExW(font_path, FR_PRIVATE, 0)
 
-    # Playwright supports navigating directly to chrome:// URLs on CDP-connected instances
-    page.goto("chrome://settings/people", wait_until="domcontentloaded")
-
-    # Check if the "Sign in to Chrome" button exists on the initial page
-    sign_in_button = page.get_by_role("button", name="Sign in to Chrome")
-
-    if sign_in_button.is_visible(timeout=3000):
-        # Trigger sign-in popup or tab
-        with context.expect_page() as new_page_info:
-            sign_in_button.click(timeout=5000)
-        
-        auth_page = new_page_info.value
-
-        # Fill Email
-        email_input = auth_page.get_by_role("textbox", name="Email or phone")
-        email_input.wait_for(state="visible", timeout=30000)
-        email_input.fill("forpwindows@gmail.com")
-        auth_page.get_by_role("button", name="Next").click(timeout=30000)
-
-        page.wait_for_timeout(1000)
-
-        # Fill Password
-        password_input = auth_page.get_by_role("textbox", name="Enter your password")
-        password_input.wait_for(state="visible", timeout=30000)
-        password_input.fill("Access4me")
-        auth_page.get_by_role("button", name="Next").click(timeout=30000)
-
-        page.wait_for_timeout(1000)
-
-        # Close every tab except the first, then navigate the first tab to x.
-        pages = context.pages
-        if pages:
-            for tab in pages[1:]:
-                tab.close()
-
-    # Navigate to Gemini Gem URL on the primary page
-    if not page.url.startswith(Constants.GEMINI_GEM_URL):
-        page.goto(Constants.GEMINI_GEM_URL, wait_until="domcontentloaded")
-
-
-    # picking the right model
-    DEFAULT_MODEL = "3.6 flash"
-
-    model_picker_btn = page.get_by_role("button", name="Open mode picker, currently")
-
-    selected_model = model_picker_btn.inner_text().strip()
-    if not DEFAULT_MODEL.lower() in selected_model.lower():
-        model_picker_btn.click(timeout=5000)
-        menu = page.locator('[data-test-id="gem-mode-menu"]')
-        elements = menu.locator('*')
-        count = elements.count()
-
-        for i in range(count):
-            element = elements.nth(i)
-
-            if element.is_visible():
-                is_pointer = element.evaluate(
-                    "(el) => getComputedStyle(el).cursor === 'pointer'"
-                )
-
-                if is_pointer:
-                    text = element.inner_text().strip()
-
-                    if DEFAULT_MODEL.lower() in text.lower():
-                        element.click(timeout=5000)
-
-    page.wait_for_timeout(1000)
-    selected_model = model_picker_btn.inner_text().strip()
-    if not DEFAULT_MODEL.lower() in selected_model.lower():
-        log(f"Couldn't select your choice of model. Defaulting to {selected_model}", LogColors.RED)
-    else:
-        log(f"Selected model {DEFAULT_MODEL}.", LogColors.GREEN)
-
-    return page
-    
-
-def run_python_code(script_content: str, max_runtime: float = 300.0) -> str:
-    with ProcessPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(task_runner.execute_code, script_content)
-
-        try:
-            return future.result(timeout=max_runtime)
-
-        except TimeoutError:
-            return (
-                f"EXECUTION_STATUS=FAILED\n"
-                f"COMMAND_EXIT_CODE=124\n"
-                f"ERROR_TYPE=TimeoutError\n"
-                f"ERROR_LINE=Unknown\n"
-                f"FULL_TRACEBACK:\n"
-                f"Command exceeded max runtime of {max_runtime}s."
-            )
-
-
-def connect_to_gemini(p, endpoint_url):
-    log(f"Connecting to Gemini at {endpoint_url}...", LogColors.YELLOW)
-
-    try:
-        browser = p.chromium.connect_over_cdp(
-            endpoint_url,
-            no_defaults=True
-        )
-
-    except Exception:
-        chrome_state = launch_lucy_chrome(preferred_port=Constants.PORT)
-        endpoint_url = chrome_state["url"]
-
-        browser = p.chromium.connect_over_cdp(
-            endpoint_url,
-            no_defaults=True
-        )
-
-    context = browser.contexts[0]
-
-    page = get_or_signin_gemini_page(context)
-
-    page.wait_for_timeout(5000) # give the page some time to load and render the UI elements
-
-    log(f"Connected to LLM.", LogColors.GREEN)
-
-    system_prompt_exists = (page.get_by_text("Your goal for this convo is simple: plan, build, and test Python scripts to complete the user's goal.").count() > 0)
-
-    if not system_prompt_exists:
-        send_request(
-            page,
-            f"{system_instruction}"
-        )
-
-        page.wait_for_timeout(5000)
-
-        log(f"Preloaded system instructions.", LogColors.GREEN)
-    else:
-        log(f"Skipped preloading system instructions. They already exist in context.", LogColors.CYAN)
-
-    return {
-        "browser": browser,
-        "context": context,
-        "page": page,
-        "endpoint_url": endpoint_url
-    }
-
-
-def reconnect(playwright_instance):
-    log(f"LLM NOT FOUND:", LogColors.RED)
-    state = None
-    if not is_cdp_port_active(Constants.PORT):
-        log("Browser not found. Attempting hard recovery...", LogColors.YELLOW)
-        chrome_state = launch_lucy_chrome(
-            preferred_port=Constants.PORT
-        )
-
-        endpoint_url = chrome_state["url"]
-
-        state = connect_to_gemini(
-            playwright_instance,
-            endpoint_url
-        )
-    else:
-        log("LLM context not found. Attempting soft recovery...", LogColors.YELLOW)
-        endpoint_url = f"http://127.0.0.1:{Constants.PORT}"
-        state = connect_to_gemini(
-            playwright_instance,
-            endpoint_url
-        )
-
-    if not state:
-        log(
-            f"Recovery failed. Please restart the application.",
-            LogColors.RED
-        )
-        exit(1)
-
-    return state
-
-
-def is_generating(page):
-    return page.get_by_role("button", name="Stop response").first.is_visible()
-
-
-def wait_for_ready(page):
-    while is_generating(page):
-        time.sleep(0.8)
-
-
-def send_request(page, request):
-
-    wait_for_ready(page)
-
-    composer = page.locator("rich-textarea .ql-editor").first
-    composer.wait_for(
-        state="visible",
-        timeout=30000
+try:
+    load_local_font(
+        r"Lucy-fonts\GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf"
     )
+except Exception as e:
+    print(f"[WARNING] Could not load font: {e}")
 
-    composer.focus()
-    composer.fill(request)
+ctk.set_appearance_mode("Dark")
 
+app = ctk.CTk()
+app.title("LUCY")
+app.overrideredirect(True)
+app.configure(fg_color=APP_BG_COLOR)
 
-    composer.evaluate("""el => {
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-    }""")
+screen_w = app.winfo_screenwidth()
+screen_h = app.winfo_screenheight()
 
-    button = page.locator(
-        'button.send-button, '
-        'button[aria-label*="Send"], '
-        'button[aria-label*="Submit"]'
-    ).first
+min_w_pct, min_h_pct = 0.20, 0.15
+max_w_px, max_h_px = 500, 400
 
+min_w = int(screen_w * min_w_pct)
+min_h = int(screen_h * min_h_pct)
 
-    button.wait_for(state="visible", timeout=30000)
-    
-    # 3. Force click via DOM if standard click fails in background
-    try:
-        button.click(timeout=3000)
-    except Exception:
-        button.evaluate("btn => btn.click()")
+app_window_width = min(max(screen_w, min_w), max_w_px)
+base_window_height = 220
+app_window_height = min(max(screen_h, min_h), base_window_height)
 
-    # 4. Fallback verification
-    try:
-        expect(composer).to_be_empty(timeout=5000)
-    except AssertionError:
-        composer.press("Enter")
-        expect(composer).to_be_empty(
-            timeout=5000, 
-            message="Failed to submit request via UI."
-        )
+pos_x = int(screen_w / 2 - (app_window_width / 2))
+pos_y = 150
 
+app.geometry(f"{app_window_width}x{app_window_height}+{pos_x}+{pos_y}")
 
-def extract_code(page):
-    wait_for_ready(page)
+# ---------------------------------------------------------
+# VISIBILITY & HOTKEY LOGIC
+# ---------------------------------------------------------
+is_visible = True
 
-    turns = page.locator('message-content, model-response, div.model-response, .response-container')
-    if turns.count() == 0:
-        raise RuntimeError("No model response found.")
-            
-    newest = turns.nth(turns.count() - 1)
-    blocks = newest.locator("pre code, code-block code")
-        
-    if blocks.count() == 0:
-        blocks = newest.locator("code")
-            
-    if blocks.count() == 0:
-        raise RuntimeError(
-            "No code block found."
-        )
+def toggle_window(app_handle, input_entry):
+    global is_visible
+    if is_visible:
+        app_handle.withdraw()
+        is_visible = False
+    else:
+        app_handle.deiconify()
+        app_handle.lift()
+        app_handle.focus_force()
+        input_entry.focus()
+        is_visible = True
 
-    if blocks.count() > 1:
-        raise RuntimeError(
-            "Returned multiple code blocks. Only 1 is supported."
-        )
+# ---------------------------------------------------------
+# DYNAMIC RESIZING & LOGGING
+# ---------------------------------------------------------
+BASE_INPUT_HEIGHT = 45
 
-    return blocks.first.inner_text(
-        timeout=30000
-    ).strip()
+def on_input_change(event=None):
+    content = repr(textbox.get("1.0", "end-1c"))
 
-
-def handle_result(code):
-    if code.lower().strip().strip('"').strip("'") == "idle":
-        return None
-
-    return run_python_code(code)
-
-
-def main():
-    try:
-        chrome_state = launch_lucy_chrome(
-            preferred_port=Constants.PORT
-        )
-
-        endpoint_url = chrome_state["url"]
-
-    except Exception as e:
-        log(
-            f"Failed to init Chrome: {e}",
-            LogColors.RED
-        )
+    if (len(content.strip("'").strip(r"\n")) == 0):
         return
 
 
-    if not is_cdp_port_active(Constants.PORT):
-        log(
-            f"Browser unreachable. Exiting.",
-            LogColors.RED
-        )
+    process_input(content, r"C:\Users\ragha\OneDrive\Desktop\LUCY\old_lucy_reference[ARCHIVED]\POWERSHELL_DEBUG_SCRIPTS", limit=5)
+
+    num_lines = content.count("\n") + 1
+    chars_per_line = 38
+    wrapped_lines = sum(
+        max(1, len(line) // chars_per_line) for line in content.split("\n")
+    )
+    effective_lines = max(num_lines, wrapped_lines)
+
+    new_input_h = BASE_INPUT_HEIGHT + (effective_lines - 1) * 22
+    target_window_h = base_window_height + (new_input_h - BASE_INPUT_HEIGHT)
+    final_window_h = min(max(target_window_h, base_window_height), max_h_px)
+
+    textbox.configure(
+        height=final_window_h - (base_window_height - BASE_INPUT_HEIGHT)
+    )
+    app.geometry(f"{app_window_width}x{final_window_h}")
+
+# ---------------------------------------------------------
+# CONDITIONAL DRAGGABLE WINDOW LOGIC
+# ---------------------------------------------------------
+_drag_start_x = 0
+_drag_start_y = 0
+is_textbox_focused = False
+
+def set_textbox_focused(focused):
+    global is_textbox_focused
+    is_textbox_focused = focused
+
+def is_event_inside_textbox(event_widget):
+    """Checks if the mouse event originated from the textbox or any of its sub-widgets."""
+    widget = event_widget
+    while widget is not None:
+        if widget == textbox:
+            return True
+        widget = getattr(widget, "master", None)
+    return False
+
+def start_drag(event):
+    global _drag_start_x, _drag_start_y
+    # Do not initiate drag if focused or clicking inside textbox/scrollbar
+    if is_textbox_focused or is_event_inside_textbox(event.widget):
         return
+    _drag_start_x = event.x
+    _drag_start_y = event.y
 
-    with sync_playwright() as p:
-        state = connect_to_gemini(
-            p,
-            endpoint_url
-        )
+def execute_drag(event):
+    # Ignore motion events if focused or clicking inside textbox/scrollbar
+    if is_textbox_focused or is_event_inside_textbox(event.widget):
+        return
+    x = app.winfo_x() - _drag_start_x + event.x
+    y = app.winfo_y() - _drag_start_y + event.y
+    app.geometry(f"+{x}+{y}")
 
+app.bind("<Button-1>", start_drag)
+app.bind("<B1-Motion>", execute_drag)
 
-        initial_request = input(
-            "Enter a task/goal to achieve: "
-        ).strip()
+# ---------------------------------------------------------
+# UI LAYOUT
+# ---------------------------------------------------------
+container = ctk.CTkFrame(app, fg_color="transparent")
+container.pack(expand=True, fill="both", padx=20, pady=15)
 
-        if not initial_request:
-            return
+container.bind("<Button-1>", start_drag)
+container.bind("<B1-Motion>", execute_drag)
 
-        request =  f"{user_prompt_prefix}{initial_request}"
+label_title = ctk.CTkLabel(
+    container,
+    text="LUCY [beta]",
+    font=("Google Sans Flex", 24, "bold"),
+    text_color="#CDD6F4",
+)
+label_title.pack(pady=(0, 2))
 
-        while True:
-            try:
-                if not is_cdp_port_active(Constants.PORT):
-                   state = reconnect(p)
+label_subtitle = ctk.CTkLabel(
+    container,
+    text="What would you like to do?",
+    font=("Google Sans Flex", 18),
+    text_color="#89B4FA",
+)
+label_subtitle.pack(pady=(0, 10))
 
-                if not request.strip():
-                    request = (
-                        "No execution output was captured. "
-                        "Try again."
-                    )
+textbox = ctk.CTkTextbox(
+    container,
+    height=BASE_INPUT_HEIGHT,
+    font=("Google Sans Flex", 15),
+    wrap="word",
+    fg_color="#313244",
+    border_color="#45475A",
+    border_width=1,
+    text_color="#CDD6F4",
+    activate_scrollbars=True,
+)
+textbox.pack(fill="x", padx=5)
+textbox.focus()
 
-                send_request(
-                    state["page"],
-                    request
-                )
+# Track focus states to explicitly block window dragging
+textbox.bind("<FocusIn>", lambda e: set_textbox_focused(True))
+textbox.bind("<FocusOut>", lambda e: set_textbox_focused(False))
 
-                log(
-                    f"Request sent.",
-                    LogColors.GREEN
-                )
+# Clicking background outside the textbox clears focus from the textbox
+def clear_focus_on_bg(event):
+    if not is_event_inside_textbox(event.widget):
+        app.focus_set()
 
+app.bind("<Button-1>", clear_focus_on_bg, add="+")
+container.bind("<Button-1>", clear_focus_on_bg, add="+")
 
-                code = extract_code(
-                    state["page"]
-                )
+textbox.bind("<KeyRelease>", on_input_change)
 
+app.bind("<Escape>", lambda event: toggle_window(app_handle=app, input_entry=textbox))
+keyboard.add_hotkey(
+    "win+space", lambda: app.after(0, toggle_window, app, textbox)
+)
 
-                if code.lower().strip() == "idle":
-
-                    log(
-                        f"Job Finished. Idling...",
-                        LogColors.GRAY
-                    )
-
-                    check_for_next_request = input(
-                        "Enter next task: "
-                    ).strip()
-
-                    if not check_for_next_request:
-                        break
-
-                    request = f"{user_prompt_prefix}{check_for_next_request}"
-
-                    continue
-
-
-                request = run_python_code(code)
-
-                log(
-                    f"OUTPUT:\n{request}",
-                    LogColors.CYAN
-                )
-                time.sleep(2)
-
-
-            except PlaywrightError as e:
-
-                if "closed" in str(e).lower():
-
-                    try:
-                        state = reconnect(p)
-                        request = initial_request
-
-                    except Exception as fatal:
-
-                        log(
-                            f"Recovery failed: {fatal}",
-                            LogColors.RED
-                        )
-                else:
-
-                    request = (
-                        f"Playwright Engine Error: {e}"
-                    )
-
-
-            except KeyboardInterrupt:
-
-                log(
-                    f"Interrupted by user.",
-                    LogColors.RED
-                )
-
-                p.stop()
-                break
-
-            except Exception as e:
-
-                log(
-                    f"Loop error caught: {e}",
-                    LogColors.RED
-                )
-
-                request = (
-                    "The execution engine encountered this error:\n"
-                    f"{str(e)}"
-                )
-
-                time.sleep(2)
-                continue
-
-
-if __name__ == "__main__":
-    main()
-
-
-# saving this shit for later
-# number of user sent prompts (how many messages we sent)
-# page.locator("user-query-content").count()
-
-
+app.mainloop()

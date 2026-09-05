@@ -1,5 +1,6 @@
 ﻿param(
-    [int]$PreferredPort = 9223
+    [int]$PreferredPort = 9223,
+    [string]$AppUrl = "https://gemini.google.com/"
 )
 
 $ErrorActionPreference = "Stop"
@@ -134,15 +135,22 @@ Write-Host "Starting Lucy Chrome..."
 Write-Host "Profile: $profileDir"
 Write-Host "Port:    $port"
 
-Start-Process `
+$chromeProcess = Start-Process `
     $ChromeExe `
     -ArgumentList @(
         "--remote-debugging-port=$port",
         "--user-data-dir=$profileDir",
-        "--profile-directory=Default"
-        #"--headless",
-        #"--disable-gpu"
-    )
+        "--profile-directory=Default",
+        "--app=$AppUrl",
+    #    "--window-position=32000,32000",
+        "--window-size=960,540",
+        "--background-tab-throttling=false",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows" ,
+        "--disable-renderer-backgrounding" ,
+        "--keep-alive-for-test"
+    ) `
+    -PassThru
 
 # Wait for CDP
 $ready = $false
@@ -164,6 +172,7 @@ if (-not $ready) {
 $state = [PSCustomObject]@{
     Port       = $port
     ProfileDir = $profileDir
+    ProcessId  = $chromeProcess.Id
     Running    = $true
 }
 

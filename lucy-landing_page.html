@@ -1,0 +1,1330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucy</title>
+<meta name="description" content="Lucy is a local-first assistant that runs commands on your machine instead of writing about them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..800&family=Archivo:wght@500;600;700;800&family=Public+Sans:ital,wght@0,400;0,500;1,400&family=Spline+Sans+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ============================================================
+   LUCY — layout theme: "RUN LOG"
+   Single committed dark world. Mono = the machine. Sans = Lucy.
+   ============================================================ */
+
+:root{
+  /* ground + surfaces: neutrals biased blue, never pure grey */
+  --void:      #05070E;
+  --under:     #080B15;
+  --slate:     #0C1120;
+  --raise:     #111829;
+  --hair:      #1A2236;
+  --hair-lit:  #263048;
+
+  /* ink */
+  --paper:     #E9EDF7;
+  --ash:       #9BA5BD;
+  --mute:      #626E88;
+
+  /* the ring */
+  --lucy:      #3D8BFF;
+  --arc:       #5FE9FF;
+  --lucy-dim:  #1E4A8C;
+
+  /* semantic, separate from accent */
+  --ember:     #FF8A3D;
+  --ember-dim: #4A2A14;
+  --ok:        #43D6A0;
+
+  --sp:        clamp(72px, 9vw, 128px);
+  --edge:      clamp(20px, 4vw, 40px);
+}
+
+*{ box-sizing: border-box; }
+
+html{ color-scheme: dark; background: var(--void); }
+img{ max-width: 100%; }
+[hidden]{ display: none !important; }
+
+body{
+  margin: 0;
+  background: var(--void);
+  color: var(--paper);
+  font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection{ background: var(--lucy); color: #fff; }
+
+a{ color: inherit; }
+
+:focus-visible{
+  outline: 2px solid var(--arc);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ---------- type roles ---------- */
+
+.display{
+  font-family: "Google Sans Flex", "Archivo", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.042em;
+  line-height: 0.98;
+  text-wrap: balance;
+  margin: 0;
+}
+
+.mono{
+  font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag{
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 0;
+}
+
+.lede{
+  font-size: clamp(17px, 1.55vw, 20px);
+  line-height: 1.58;
+  color: var(--ash);
+  max-width: 60ch;
+  margin: 0;
+}
+
+.body{
+  color: var(--ash);
+  max-width: 62ch;
+  margin: 0;
+}
+
+.body strong{ color: var(--paper); font-weight: 500; }
+
+/* ---------- shell ---------- */
+
+.wrap{
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: var(--edge);
+}
+
+/* ============================================================
+   HERO
+   ============================================================ */
+
+.hero{
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  padding-block: clamp(40px, 5vw, 72px);
+  overflow: hidden;
+  border-bottom: 1px solid var(--hair);
+}
+.hero > .wrap{ width: 100%; }
+
+/* barely there: a cool cast in the corners you feel before you notice */
+.hero-glow{
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(48% 58% at 94% 2%,  rgba(61,139,255,.10), transparent 68%),
+    radial-gradient(42% 52% at 2% 98%,  rgba(95,233,255,.045), transparent 70%);
+}
+
+.hero-stage{
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.hero-h1{
+  font-size: clamp(48px, 8.6vw, 118px);
+  font-weight: 800;
+  margin-top: clamp(-28px, -2.4vw, -8px);
+}
+
+.hero-sub{
+  margin: clamp(16px, 2vw, 24px) 0 0;
+  max-width: 54ch;
+  font-size: clamp(15px, 1.5vw, 18.5px);
+  line-height: 1.55;
+  color: var(--ash);
+  text-wrap: balance;
+}
+
+/* ---------- the CTA ---------- */
+
+.cta-wrap{
+  position: relative;
+  display: inline-flex;
+  margin-top: clamp(26px, 3.4vw, 44px);
+}
+
+.cta{
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: clamp(15px, 1.7vw, 19px) clamp(26px, 3vw, 36px);
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  color: #04060D;
+  font-family: "Google Sans Flex", "Archivo", sans-serif;
+  font-weight: 600;
+  font-size: clamp(15px, 1.5vw, 18px);
+  letter-spacing: -0.012em;
+  background: linear-gradient(115deg, #7BEFFF 0%, #3D8BFF 46%, #2B63DC 100%);
+  background-size: 200% 100%;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.55),
+    inset 0 -2px 8px rgba(4,10,40,.28),
+    0 14px 40px -14px rgba(61,139,255,.85);
+  animation: ctaDrift 7s ease-in-out infinite;
+  transition: box-shadow .3s ease, top .12s ease;
+  top: 0;
+}
+
+/* the gradient itself never sits still */
+@keyframes ctaDrift{
+  0%,100%{ background-position: 0% 50%; }
+  50%    { background-position: 100% 50%; }
+}
+
+/* the sheen sweeps across the face on hover, clipped to the button */
+.cta-shine{
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.cta-shine::before{
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 42%;
+  height: 100%;
+  background: linear-gradient(100deg,
+    transparent, rgba(255,255,255,.65) 48%, transparent);
+  transform: skewX(-18deg);
+}
+.cta:hover .cta-shine::before{ animation: ctaSheen .85s ease-out; }
+@keyframes ctaSheen{
+  from{ left: -60%; }
+  to  { left: 135%; }
+}
+
+.cta-label{ position: relative; z-index: 2; white-space: nowrap; }
+
+.cta-arrow{
+  position: relative;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  transition: transform .3s cubic-bezier(.2,.9,.3,1.3);
+}
+
+.cta:hover{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.7),
+    inset 0 -2px 8px rgba(4,10,40,.22),
+    0 22px 60px -16px rgba(95,233,255,.9);
+}
+.cta:hover .cta-arrow{ transform: translateX(5px); }
+
+.cta:active{
+  top: 2px;
+  box-shadow:
+    inset 0 2px 7px rgba(4,10,40,.35),
+    0 8px 24px -14px rgba(61,139,255,.8);
+}
+
+/* the moment after a press */
+.cta.sent .cta-arrow{ animation: ctaLaunch .55s cubic-bezier(.4,0,.2,1); }
+@keyframes ctaLaunch{
+  0%  { transform: translateX(0);    opacity: 1; }
+  45% { transform: translateX(26px); opacity: 0; }
+  55% { transform: translateX(-22px);opacity: 0; }
+  100%{ transform: translateX(0);    opacity: 1; }
+}
+
+.btn{
+  font-family: "Google Sans Flex", "Archivo", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 13px 22px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background .18s ease, border-color .18s ease, color .18s ease;
+}
+
+.btn-solid{
+  background: var(--lucy);
+  color: #04060D;
+  box-shadow: 0 0 0 1px rgba(95,233,255,.25), 0 10px 34px -14px rgba(61,139,255,.9);
+}
+.btn-solid:hover{ background: var(--arc); }
+
+/* the ring */
+.ringbox{
+  position: relative;
+  aspect-ratio: 1;
+  width: min(520px, 46vh, 78vw);
+}
+.ringbox canvas{
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ============================================================
+   SECTION SPINE
+   ============================================================ */
+
+.sec{
+  border-top: 1px solid var(--hair);
+  padding-block: var(--sp);
+}
+.hero + .sec{ border-top: 0; }
+
+.sec-grid{
+  display: grid;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: clamp(28px, 4vw, 56px);
+  align-items: start;
+}
+
+.spine{
+  position: sticky;
+  top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spine .tick{
+  width: 26px;
+  height: 1px;
+  background: var(--lucy);
+}
+.spine.warn .tick{ background: var(--ember); }
+
+.sec-head{
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 46px;
+}
+
+.sec-h2{
+  font-size: clamp(30px, 4.1vw, 52px);
+  max-width: 19ch;
+}
+
+/* ============================================================
+   PREMISE — the two timelines
+   ============================================================ */
+
+.tracks{
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 46px;
+}
+
+.track{
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  background: var(--under);
+  padding: 18px 20px 20px;
+}
+.track.mine{
+  border-color: var(--lucy-dim);
+  background: linear-gradient(180deg, rgba(61,139,255,.07), rgba(61,139,255,0) 70%), var(--under);
+}
+
+.track-top{
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.track-name{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ash);
+}
+.track.mine .track-name{ color: var(--arc); }
+
+.track-total{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 21px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--paper);
+}
+.track.mine .track-total{ color: var(--arc); }
+.track-total .unit{ font-size: 12px; color: var(--mute); margin-left: 2px; }
+
+.bar{
+  display: flex;
+  width: 100%;
+  height: 26px;
+  border-radius: 2px;
+  overflow: hidden;
+  gap: 2px;
+  background: var(--slate);
+}
+
+.seg{
+  position: relative;
+  min-width: 2px;
+  background: var(--hair-lit);
+}
+.track.mine .seg{ background: var(--lucy-dim); }
+.track.mine .seg.hot{ background: linear-gradient(90deg, var(--lucy), var(--arc)); }
+
+.legend{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 12px;
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 11.5px;
+  color: var(--mute);
+}
+.legend b{ color: var(--ash); font-weight: 500; }
+
+.aside{
+  margin-top: 30px;
+  border-left: 2px solid var(--hair-lit);
+  padding-left: 18px;
+  color: var(--mute);
+  font-size: 15px;
+  max-width: 60ch;
+}
+.aside b{ color: var(--ash); font-weight: 500; }
+
+/* ============================================================
+   PATH — the ordered five
+   ============================================================ */
+
+.steps{
+  display: flex;
+  flex-direction: column;
+}
+
+.step{
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: clamp(18px, 3vw, 40px);
+  padding-block: 30px;
+  border-top: 1px solid var(--hair);
+  align-items: start;
+}
+.step:first-child{ border-top: 0; padding-top: 0; }
+
+.step-n{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--lucy);
+  padding-top: 6px;
+}
+
+.step-b{ display: flex; flex-direction: column; gap: 9px; }
+
+.step-t{
+  font-family: "Google Sans Flex", "Archivo", sans-serif;
+  font-weight: 600;
+  font-size: clamp(19px, 2vw, 24px);
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.step-code{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 12.5px;
+  color: var(--arc);
+  background: rgba(61,139,255,.07);
+  border: 1px solid var(--hair);
+  border-radius: 2px;
+  padding: 7px 11px;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   LIBRARY
+   ============================================================ */
+
+.libstat{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 34px;
+  margin-bottom: 34px;
+  padding-bottom: 30px;
+  border-bottom: 1px solid var(--hair);
+}
+.libstat .n{
+  font-family: "Google Sans Flex", "Archivo", sans-serif;
+  font-weight: 700;
+  font-size: clamp(30px, 3.6vw, 42px);
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.libstat .l{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin-top: 8px;
+}
+
+.cmds{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.cmd{
+  background: var(--under);
+  padding: 15px 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: background .16s ease;
+}
+.cmd:hover{ background: var(--raise); }
+
+.cmd .name{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arc);
+}
+.cmd .desc{
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--mute);
+}
+
+.libfoot{
+  margin-top: 20px;
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 12px;
+  color: var(--mute);
+}
+.libfoot span{ color: var(--ash); }
+
+/* ============================================================
+   TOOLKIT
+   ============================================================ */
+
+.kit{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1px;
+  background: var(--hair);
+  border-block: 1px solid var(--hair);
+}
+
+.tool{
+  background: var(--void);
+  padding: 30px 26px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tool .verb{
+  font-family: "Google Sans Flex", "Archivo", sans-serif;
+  font-weight: 700;
+  font-size: 27px;
+  letter-spacing: -0.035em;
+  margin: 0;
+}
+.tool .what{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--lucy);
+}
+.tool p{ margin: 0; color: var(--ash); font-size: 14.5px; line-height: 1.58; }
+
+/* ============================================================
+   FAILURE — the ember section
+   ============================================================ */
+
+.sec.fail{
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgba(255,138,61,.07), transparent 60%),
+    var(--under);
+  border-top: 1px solid var(--ember-dim);
+}
+.sec.fail .step-n{ color: var(--ember); }
+
+.trace{
+  margin-top: 40px;
+  border: 1px solid var(--ember-dim);
+  border-radius: 3px;
+  background: #0A0A10;
+  overflow: hidden;
+}
+
+.trace-bar{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 16px;
+  background: rgba(255,138,61,.09);
+  border-bottom: 1px solid var(--ember-dim);
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+.trace-bar .rid{ color: var(--mute); letter-spacing: 0.06em; }
+
+.trace-body{
+  padding: 18px 16px 20px;
+  overflow-x: auto;
+}
+
+.trace table{
+  border-collapse: collapse;
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 13px;
+  width: 100%;
+  min-width: 480px;
+}
+.trace td{
+  padding: 5px 0;
+  vertical-align: top;
+}
+.trace td.f{
+  color: var(--mute);
+  padding-right: 26px;
+  white-space: nowrap;
+  letter-spacing: 0.05em;
+}
+.trace td.v{ color: var(--paper); }
+.trace td.v em{ font-style: normal; color: var(--ember); }
+.trace td.v .ok{ color: var(--ok); }
+.trace td.v .fix{ color: var(--arc); }
+
+.trace-note{
+  padding: 13px 16px;
+  border-top: 1px solid var(--hair);
+  font-size: 13.5px;
+  color: var(--mute);
+}
+.trace-note b{ color: var(--ash); font-weight: 500; }
+
+/* ============================================================
+   QUIET PART
+   ============================================================ */
+
+.three{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: clamp(24px, 3vw, 44px);
+  margin-top: 44px;
+}
+.point{ display: flex; flex-direction: column; gap: 9px; }
+.point h4{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lucy);
+  margin: 0;
+  padding-top: 13px;
+  border-top: 1px solid var(--hair-lit);
+}
+.point p{ margin: 0; color: var(--ash); font-size: 14.5px; }
+
+/* ============================================================
+   RELEASE LOG
+   ============================================================ */
+
+.log{
+  display: flex;
+  flex-direction: column;
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 13.5px;
+}
+
+.logrow{
+  display: grid;
+  grid-template-columns: 104px 74px minmax(0, 1fr);
+  gap: 18px;
+  padding: 14px 4px;
+  border-top: 1px solid var(--hair);
+  align-items: baseline;
+}
+.logrow:first-child{ border-top: 0; }
+.logrow .d{ color: var(--mute); font-variant-numeric: tabular-nums; }
+.logrow .v{ color: var(--arc); }
+.logrow .m{ color: var(--ash); font-family: "Public Sans", sans-serif; font-size: 14.5px; }
+.logrow .m b{ color: var(--paper); font-weight: 500; }
+
+.loglink{
+  margin-top: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--arc);
+  text-decoration: none;
+  border-bottom: 1px solid var(--lucy-dim);
+  padding-bottom: 4px;
+  align-self: flex-start;
+}
+.loglink:hover{ border-color: var(--arc); }
+
+/* ============================================================
+   CLOSE
+   ============================================================ */
+
+.close{
+  border-top: 1px solid var(--hair);
+  padding-block: clamp(128px, 16vw, 220px) clamp(140px, 17vw, 240px);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.close-glow{
+  position: absolute;
+  inset: auto 0 -46% 0;
+  height: 640px;
+  background: radial-gradient(closest-side, rgba(61,139,255,.16), transparent 72%);
+  pointer-events: none;
+}
+
+.close-in{
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+}
+
+.close-ring{ width: 168px; height: 168px; }
+.close-ring canvas{ width: 100%; height: 100%; display: block; }
+
+.close-h{
+  font-size: clamp(34px, 5.6vw, 68px);
+  max-width: 15ch;
+}
+
+.close .lede{ text-align: center; margin-inline: auto; }
+
+.signup{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.signup input{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 13.5px;
+  color: var(--paper);
+  background: var(--under);
+  border: 1px solid var(--hair-lit);
+  border-radius: 3px;
+  padding: 13px 15px;
+  width: min(320px, 76vw);
+}
+.signup input::placeholder{ color: var(--mute); }
+.signup input:focus{ border-color: var(--lucy); outline: none; }
+
+.signed{
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 13px;
+  color: var(--ok);
+  min-height: 20px;
+  margin: 0;
+}
+
+footer{
+  border-top: 1px solid var(--hair);
+  padding-block: 28px 40px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  align-items: center;
+  justify-content: space-between;
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+footer .fl{ display: flex; flex-wrap: wrap; gap: 22px; }
+footer a{ text-decoration: none; }
+footer a:hover{ color: var(--ash); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 940px){
+  .sec-grid{ grid-template-columns: 1fr; gap: 22px; }
+  .spine{ position: static; flex-direction: row; align-items: center; gap: 12px; }
+  .spine .tick{ width: 18px; }
+}
+
+@media (max-width: 620px){
+  .step{ grid-template-columns: 1fr; gap: 8px; }
+  .step-n{ padding-top: 0; }
+  .logrow{ grid-template-columns: 96px 1fr; gap: 6px 14px; }
+  .logrow .m{ grid-column: 1 / -1; }
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-glow" aria-hidden="true"></div>
+
+  <div class="wrap">
+    <div class="hero-stage">
+      <div class="ringbox">
+        <canvas id="ring" width="1040" height="1040" aria-hidden="true"></canvas>
+      </div>
+
+      <h1 class="display hero-h1">Siri on steroids.</h1>
+
+      <p class="hero-sub">Play a song, find a file, answer an email, chart a month of data: Lucy runs it on your machine instead of writing about it.</p>
+
+      <span class="cta-wrap">
+        <button class="cta" type="button" id="ask">
+          <span class="cta-shine" aria-hidden="true"></span>
+          <span class="cta-label">Ask Anything, Everything.</span>
+          <svg class="cta-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 12h15"></path><path d="M13 6l6 6-6 6"></path>
+          </svg>
+        </button>
+      </span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ PREMISE ============ -->
+<section class="sec" id="premise">
+  <div class="wrap sec-grid">
+    <div class="spine">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">The premise</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">Chat is the slowest way to use a computer.</h2>
+        <p class="lede">Every other assistant answers you. The words have to leave your machine, wait in a queue, get written one token at a time, and come back — and at the end of all that, you still have to go do the thing yourself.</p>
+      </div>
+
+      <p class="body">Lucy skips four of those five steps for anything she already knows how to do. The request never leaves the room.</p>
+
+      <div class="tracks">
+        <div class="track">
+          <div class="track-top">
+            <span class="track-name">Cloud round trip</span>
+            <span class="track-total">2,170<span class="unit">ms</span></span>
+          </div>
+          <div class="bar" role="img" aria-label="Cloud round trip: capture 40ms, upload 180ms, queue 300ms, generate 1400ms, return 190ms, then you execute 60ms">
+            <div class="seg" style="flex:40"></div>
+            <div class="seg" style="flex:180"></div>
+            <div class="seg" style="flex:300"></div>
+            <div class="seg" style="flex:1400"></div>
+            <div class="seg" style="flex:190"></div>
+            <div class="seg" style="flex:60"></div>
+          </div>
+          <div class="legend">
+            <span><b>40</b> capture</span>
+            <span><b>180</b> upload</span>
+            <span><b>300</b> queue</span>
+            <span><b>1,400</b> generate</span>
+            <span><b>190</b> return</span>
+            <span><b>60</b> you run it</span>
+          </div>
+        </div>
+
+        <div class="track mine">
+          <div class="track-top">
+            <span class="track-name">Lucy, local</span>
+            <span class="track-total">240<span class="unit">ms</span></span>
+          </div>
+          <div class="bar" role="img" aria-label="Lucy local: match 12ms, order 8ms, execute 220ms">
+            <div class="seg" style="flex:12"></div>
+            <div class="seg" style="flex:8"></div>
+            <div class="seg hot" style="flex:220"></div>
+          </div>
+          <div class="legend">
+            <span><b>12</b> match</span>
+            <span><b>8</b> order</span>
+            <span><b>220</b> execute</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="aside">Same scale, both bars. <b>The long stretch in the first one is a datacenter deciding what to say about your request.</b> The long stretch in the second one is your computer doing it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PATH ============ -->
+<section class="sec" id="path">
+  <div class="wrap sec-grid">
+    <div class="spine">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">The path</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">What happens between saying it and it being done.</h2>
+        <p class="lede">Five stages, in this order, every time. Nothing here waits on a model.</p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <span class="step-n mono">01</span>
+          <div class="step-b">
+            <h3 class="step-t">Heard</h3>
+            <p class="body">Your words, the way you said them. No syntax to learn, no prompt to engineer, no keywords to remember. <strong>"play my phonk playlist" is a valid command.</strong></p>
+            <code class="step-code">&gt; play my phonk playlist</code>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n mono">02</span>
+          <div class="step-b">
+            <h3 class="step-t">Matched</h3>
+            <p class="body">Lucy searches the library for every command that could serve the request and scores them against what you actually asked — not what a keyword lookup thinks you asked. Weak matches are cheap to discard. This is the part that has to be good.</p>
+            <code class="step-code">media.resolve 0.94 · media.play 0.91 · media.queue 0.66</code>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n mono">03</span>
+          <div class="step-b">
+            <h3 class="step-t">Ordered</h3>
+            <p class="body">One command almost never finishes a job. Lucy sorts the matches into an order that makes sense on a real system: <strong>find before filter, filter before act, act before report.</strong></p>
+            <code class="step-code">resolve → play → confirm</code>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n mono">04</span>
+          <div class="step-b">
+            <h3 class="step-t">Chained</h3>
+            <p class="body">The ordered commands become one run. Output from each step feeds the next, and every step knows how to fail without taking the rest of the chain down with it.</p>
+            <code class="step-code">lucy chain --steps 3 --halt-on-error --keep-state</code>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-n mono">05</span>
+          <div class="step-b">
+            <h3 class="step-t">Run</h3>
+            <p class="body">On your machine. Your files, your sessions, your permissions, your speaker. Then Lucy tells you what she did — out loud, if you want it out loud.</p>
+            <code class="step-code">✓ 3 steps · 240ms · phonk (47 tracks) playing</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LIBRARY ============ -->
+<section class="sec" id="library">
+  <div class="wrap sec-grid">
+    <div class="spine">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">The library</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">Nothing is improvised.</h2>
+        <p class="lede">The library is the product. Every command in it has already run on real machines, across real setups, and survived. When Lucy takes an action, she isn't writing code and hoping — she's reaching for something that has worked before.</p>
+      </div>
+
+      <div class="libstat">
+        <div>
+          <div class="n">1,240</div>
+          <div class="l">Commands</div>
+        </div>
+        <div>
+          <div class="n">96</div>
+          <div class="l">Tested chains</div>
+        </div>
+        <div>
+          <div class="n">+34</div>
+          <div class="l">Added this month</div>
+        </div>
+        <div>
+          <div class="n">0</div>
+          <div class="l">Written at runtime</div>
+        </div>
+      </div>
+
+      <div class="cmds">
+        <div class="cmd"><span class="name mono">mail.search</span><span class="desc">IMAP query across every folder, unread first</span></div>
+        <div class="cmd"><span class="name mono">mail.send</span><span class="desc">SMTP send with the draft kept until it lands</span></div>
+        <div class="cmd"><span class="name mono">mail.thread</span><span class="desc">Pull a whole conversation in reading order</span></div>
+        <div class="cmd"><span class="name mono">media.play</span><span class="desc">Resolve a name to a track and start it</span></div>
+        <div class="cmd"><span class="name mono">yt.playlist</span><span class="desc">Queue one of your playlists, shuffled or not</span></div>
+        <div class="cmd"><span class="name mono">yt.comments</span><span class="desc">Top comments on whatever is on screen</span></div>
+        <div class="cmd"><span class="name mono">fs.find</span><span class="desc">Search by name, contents, size, or when you touched it</span></div>
+        <div class="cmd"><span class="name mono">fs.dedupe</span><span class="desc">Hash-match duplicates, keep the newest</span></div>
+        <div class="cmd"><span class="name mono">fs.archive</span><span class="desc">Fold a folder into a dated zip and clear it out</span></div>
+        <div class="cmd"><span class="name mono">plot.line</span><span class="desc">Chart a column from any CSV, drawn with Raylib</span></div>
+        <div class="cmd"><span class="name mono">render.3d</span><span class="desc">Throw a mesh or point cloud on screen to look at</span></div>
+        <div class="cmd"><span class="name mono">tts.speak</span><span class="desc">Read the last response back in the system voice</span></div>
+        <div class="cmd"><span class="name mono">sys.state</span><span class="desc">Snapshot processes, drives, and network right now</span></div>
+        <div class="cmd"><span class="name mono">proc.kill</span><span class="desc">End what's eating the machine, by name or by weight</span></div>
+        <div class="cmd"><span class="name mono">net.speed</span><span class="desc">Real throughput, no browser tab required</span></div>
+        <div class="cmd"><span class="name mono">clip.write</span><span class="desc">Put a result straight on the clipboard</span></div>
+      </div>
+
+      <p class="libfoot">Growing is the maintenance cost, and the point. <span>New commands ship only after they run clean on Windows 10 and 11, on machines that aren't ours.</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TOOLKIT ============ -->
+<section class="sec" id="toolkit">
+  <div class="wrap sec-grid">
+    <div class="spine">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">The toolkit</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">Four things she does without asking anyone.</h2>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="kit">
+      <div class="tool">
+        <span class="what mono">Mail · SMTP + IMAP</span>
+        <h3 class="verb">Send it.</h3>
+        <p>Gmail through its old interface, on purpose. It's faster, it doesn't fight automation, and it doesn't depend on an API key you have to keep alive. Read a thread, find the one about the invoice, reply, done.</p>
+      </div>
+      <div class="tool">
+        <span class="what mono">Media · YouTube</span>
+        <h3 class="verb">Play it.</h3>
+        <p>If it exists, it's on YouTube — which makes it the whole music library and the whole video library at once. Play anything, run your playlists, pull the top comments on what's in front of you.</p>
+      </div>
+      <div class="tool">
+        <span class="what mono">Graphics · Raylib</span>
+        <h3 class="verb">Draw it.</h3>
+        <p>Some answers are a shape, not a sentence. Lucy renders 2D and 3D directly, so a month of numbers arrives as a chart on screen instead of a paragraph describing one.</p>
+      </div>
+      <div class="tool">
+        <span class="what mono">Voice · Windows TTS</span>
+        <h3 class="verb">Say it.</h3>
+        <p>Everything comes back out loud. Fixed responses are instant because they're already written; anything a model wrote gets spoken the moment the first line lands, not after the last one.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAILURE ============ -->
+<section class="sec fail" id="trace">
+  <div class="wrap sec-grid">
+    <div class="spine warn">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">When it breaks</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">Most assistants apologize. Lucy hands you the trace.</h2>
+        <p class="lede">Something will fail. A path moves, a password expires, a site changes its markup. What matters is what you get back — and "sorry, I ran into an issue" is not an answer, it's a shrug.</p>
+      </div>
+
+      <p class="body">You get the command that failed, the step it failed on, the line, the error the system actually returned, and what your machine looked like on both sides of the break. <strong>Enough to fix it in one move.</strong></p>
+
+      <div class="trace">
+        <div class="trace-bar">
+          <span>✕ Chain halted</span>
+          <span class="rid mono">run 4f12a9</span>
+        </div>
+        <div class="trace-body">
+          <table>
+            <tbody>
+              <tr><td class="f">step</td><td class="v">3 of 4 &nbsp;·&nbsp; <em>mail.send</em></td></tr>
+              <tr><td class="f">line</td><td class="v">smtp_client.py:41</td></tr>
+              <tr><td class="f">error</td><td class="v"><em>SMTPAuthenticationError (535)</em></td></tr>
+              <tr><td class="f">cause</td><td class="v">app password rejected by smtp.gmail.com</td></tr>
+              <tr><td class="f">state before</td><td class="v"><span class="ok">2 steps ok</span> · draft written to ~/.lucy/outbox/1841.eml</td></tr>
+              <tr><td class="f">state after</td><td class="v">chain halted · nothing sent · draft kept</td></tr>
+              <tr><td class="f">fix</td><td class="v">regenerate the app password, then <span class="fix">lucy retry 4f12a9</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="trace-note"><b>Retry resumes at step 3.</b> The two steps that worked don't run again, and your draft is exactly where you left it. Nothing was half-sent.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ QUIET PART ============ -->
+<section class="sec" id="models">
+  <div class="wrap sec-grid">
+    <div class="spine">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">The quiet part</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">She calls a model when a model is the only thing that will do.</h2>
+        <p class="lede">Writing something in your voice. Making sense of a request she's never seen. Those are worth the round trip. Playing a song isn't. Finding a file isn't. Checking the weather isn't.</p>
+      </div>
+
+      <div class="three">
+        <div class="point">
+          <h4>Search</h4>
+          <p>Formatted results, not paragraphs about results. You get the links and the number you were after in less time than it takes a model to write its first sentence.</p>
+        </div>
+        <div class="point">
+          <h4>Cost</h4>
+          <p>Most days Lucy never calls out at all. On the days she does, a free tier covers it. Nobody should need a subscription to open a file.</p>
+        </div>
+        <div class="point">
+          <h4>Consent</h4>
+          <p>Every model call is visible before it happens. You always know the moment something leaves your machine, and you can always say no.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RELEASE LOG ============ -->
+<section class="sec" id="log">
+  <div class="wrap sec-grid">
+    <div class="spine">
+      <span class="tick" aria-hidden="true"></span>
+      <p class="tag">Release log</p>
+    </div>
+
+    <div>
+      <div class="sec-head">
+        <h2 class="display sec-h2">What shipped, and when.</h2>
+      </div>
+
+      <div class="log">
+        <div class="logrow">
+          <span class="d">2026.09.02</span><span class="v">v0.7.4</span>
+          <span class="m"><b>Chains.</b> Retry resumes from the step that failed instead of starting the run over.</span>
+        </div>
+        <div class="logrow">
+          <span class="d">2026.08.28</span><span class="v">v0.7.3</span>
+          <span class="m"><b>Library.</b> 34 new file commands. <code class="mono">fs.dedupe</code> now handles junctions and symlinks without following them into a loop.</span>
+        </div>
+        <div class="logrow">
+          <span class="d">2026.08.19</span><span class="v">v0.7.2</span>
+          <span class="m"><b>Mail.</b> IMAP idle keeps threads live, so "did anyone reply" doesn't cost a poll.</span>
+        </div>
+        <div class="logrow">
+          <span class="d">2026.08.11</span><span class="v">v0.7.0</span>
+          <span class="m"><b>Matching.</b> New scorer. Multi-step requests now resolve to the right chain roughly three times as often.</span>
+        </div>
+        <div class="logrow">
+          <span class="d">2026.07.30</span><span class="v">v0.6.8</span>
+          <span class="m"><b>Voice.</b> TTS starts speaking on the first line of a long response instead of waiting for the last.</span>
+        </div>
+      </div>
+
+      <a class="loglink" href="#log">Read the full changelog →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CLOSE ============ -->
+<section class="close" id="access">
+  <div class="close-glow" aria-hidden="true"></div>
+  <div class="wrap close-in">
+    <div class="close-ring">
+      <canvas id="ring2" width="320" height="320" aria-hidden="true"></canvas>
+    </div>
+
+    <h2 class="display close-h">Stop typing at a chat window.</h2>
+    <p class="lede">Lucy runs on Windows. Early access is small and slow on purpose — every command in the library gets tested on the machines it ships to before anyone else gets it.</p>
+
+    <form class="signup" id="form">
+      <label class="tag" for="email" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Email</label>
+      <input id="email" type="email" placeholder="you@yourmachine.com" autocomplete="email" required>
+      <button class="btn btn-solid" type="submit">Request access</button>
+    </form>
+    <p class="signed" id="signed" role="status"></p>
+  </div>
+</section>
+
+<footer class="wrap">
+  <span>Lucy · local-first · Windows</span>
+  <span class="fl">
+    <a href="#path">How it works</a>
+    <a href="#library">Library</a>
+    <a href="#log">Updates</a>
+    <a href="#trace">Failure policy</a>
+  </span>
+</footer>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- the ring ---------- */
+  function makeRing(canvas, opts){
+    var ctx = canvas.getContext("2d");
+    var W = canvas.width, H = canvas.height;
+    var cx = W/2, cy = H/2;
+    var R = Math.min(W,H) * (opts.radius || 0.30);
+    var strands = opts.strands || 5;
+    var t = 0;
+
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      ctx.globalCompositeOperation = "lighter";
+
+      for(var s=0; s<strands; s++){
+        var phase = s * 1.7;
+        var amp   = R * (0.012 + s * 0.011);
+        var hue   = s / (strands - 1 || 1);
+        var col   = hue < 0.5 ? "61,139,255" : "95,233,255";
+        var alpha = 0.30 + 0.14 * (1 - hue);
+
+        ctx.beginPath();
+        for(var a=0; a<=360; a+=1.4){
+          var r = a * Math.PI / 180;
+          var w = amp * Math.sin(r*3 + t*0.9 + phase)
+                + amp * 0.7 * Math.sin(r*5 - t*0.6 + phase*1.4)
+                + amp * 0.45 * Math.sin(r*2 + t*1.3 + phase*0.6);
+          var rr = R + w + s * R * 0.008;
+          var x = cx + Math.cos(r) * rr;
+          var y = cy + Math.sin(r) * rr;
+          if(a === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = "rgba(" + col + "," + alpha + ")";
+        ctx.lineWidth = Math.max(1, W * 0.0022);
+        ctx.shadowBlur = W * 0.028;
+        ctx.shadowColor = "rgba(61,139,255,0.85)";
+        ctx.stroke();
+      }
+
+      /* inner bloom */
+      ctx.shadowBlur = 0;
+      var g = ctx.createRadialGradient(cx,cy,0,cx,cy,R*1.02);
+      g.addColorStop(0, "rgba(61,139,255,0.055)");
+      g.addColorStop(0.72, "rgba(61,139,255,0.035)");
+      g.addColorStop(1, "rgba(61,139,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx,cy,R*1.02,0,Math.PI*2);
+      ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    draw();
+    if(!reduce){
+      (function loop(){
+        t += 0.016;
+        draw();
+        requestAnimationFrame(loop);
+      })();
+    }
+  }
+
+  var r1 = document.getElementById("ring");
+  var r2 = document.getElementById("ring2");
+  if(r1) makeRing(r1, { radius: 0.30, strands: 6 });
+  if(r2) makeRing(r2, { radius: 0.34, strands: 4 });
+
+  /* ---------- the mic invites a press ---------- */
+  var ask = document.getElementById("ask");
+  if(ask){
+    ask.addEventListener("click", function(){
+      ask.classList.remove("sent");
+      void ask.offsetWidth;      /* restart the animation on repeat presses */
+      ask.classList.add("sent");
+    });
+  }
+
+  /* ---------- access form ---------- */
+  var form = document.getElementById("form");
+  if(form){
+    form.addEventListener("submit", function(e){
+      e.preventDefault();
+      document.getElementById("signed").textContent = "✓ On the list. Lucy will write when there's a build for you.";
+      form.reset();
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@ import os
 import time
 import json
 import requests
-from lucy_tts import speak
+from Utils.lucy_tts import speak
 
 
 # sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)

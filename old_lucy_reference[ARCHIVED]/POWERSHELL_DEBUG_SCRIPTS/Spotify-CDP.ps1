@@ -6,6 +6,7 @@
 $script:SpotifyCDPPort = 9222
 $script:SpotifyCDPBase = "http://127.0.0.1:$($script:SpotifyCDPPort)"
 $script:SpotifyTargetWebSocket = $null
+$script:SpotifyCDPRetrying = $false
 
 # ============================================================
 # PROCESS / CDP SESSION
@@ -48,6 +49,11 @@ function Start-SpotifyCDP {
     }
 
     $exe = Get-SpotifyExecutable
+    if (-not $exe) {
+        Write-Host "Spotify executable could not be found." -ForegroundColor Red
+        return
+    }
+
     $running = Get-Process Spotify -ErrorAction SilentlyContinue
 
     if ($running) {
@@ -99,8 +105,12 @@ function Initialize-SpotifyCDP {
         Start-SpotifyCDP
     }
 
-    if (-not $script:SpotifyTargetWebSocket) {
-        $script:SpotifyTargetWebSocket = (Get-SpotifyCDPTarget).webSocketDebuggerUrl
+    $target = Get-SpotifyCDPTarget
+    if ($target -and $target.webSocketDebuggerUrl) {
+        $script:SpotifyTargetWebSocket = $target.webSocketDebuggerUrl
+    }
+    else {
+        $script:SpotifyTargetWebSocket = $null
     }
 
     return $script:SpotifyTargetWebSocket
@@ -117,7 +127,7 @@ function Invoke-SpotifyCDPCommand {
     $ct = [System.Threading.CancellationToken]::None
 
     try {
-        $ws.ConnectAsync([Uri]$wsUrl, $ct).GetAwaiter().GetResult()
+        $null = $ws.ConnectAsync([Uri]$wsUrl, $ct).GetAwaiter().GetResult()
 
         $id = Get-Random -Minimum 1000 -Maximum 999999999
         $payload = @{
@@ -129,7 +139,7 @@ function Invoke-SpotifyCDPCommand {
         $sendBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
         $sendSeg = [System.ArraySegment[byte]]::new($sendBytes)
 
-        $ws.SendAsync(
+        $null = $ws.SendAsync(
             $sendSeg,
             [System.Net.WebSockets.WebSocketMessageType]::Text,
             $true,
@@ -146,7 +156,7 @@ function Invoke-SpotifyCDPCommand {
                 $result = $ws.ReceiveAsync($segment, $ct).GetAwaiter().GetResult()
 
                 if ($result.Count -gt 0) {
-                    $stream.Write($buffer, 0, $result.Count)
+                    $null = $stream.Write($buffer, 0, $result.Count)
                 }
             }
             while (-not $result.EndOfMessage)
@@ -163,14 +173,25 @@ function Invoke-SpotifyCDPCommand {
         }
     }
     catch {
-        # Target may have changed after navigation/reload.
+        # Refresh a stale target once. This also handles Spotify being
+        # minimized or refreshed without requiring the caller to reload the script.
         $script:SpotifyTargetWebSocket = $null
-        Write-Host "Spotify CDP command failed due to a network issue." -ForegroundColor Red
+        if (-not $script:SpotifyCDPRetrying) {
+            $script:SpotifyCDPRetrying = $true
+            try {
+                return Invoke-SpotifyCDPCommand -Method $Method -Params $Params
+            }
+            finally {
+                $script:SpotifyCDPRetrying = $false
+            }
+        }
+
+        Write-Host "Spotify CDP command failed. Verify Spotify is running with remote debugging enabled on port $script:SpotifyCDPPort." -ForegroundColor Red
     }
     finally {
         try {
             if ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-                $ws.CloseAsync(
+                $null = $ws.CloseAsync(
                     [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
                     "done",
                     $ct
@@ -194,11 +215,33 @@ function Invoke-SpotifyJS {
             awaitPromise  = $true
         }
 
-    if ($result.exceptionDetails) {
-        Write-Host "Spotify JavaScript failed: $($result.exceptionDetails.text)" -ForegroundColor Red
+    if (-not $result) {
+        return $null
     }
 
-    return $result.result.value
+    $exceptionDetails = $result.PSObject.Properties['exceptionDetails']
+    if ($exceptionDetails -and $exceptionDetails.Value) {
+        $errorText = $exceptionDetails.Value.text
+        if (-not $errorText) {
+            $exceptionProperty = $exceptionDetails.Value.PSObject.Properties['exception']
+            if ($exceptionProperty -and $exceptionProperty.Value) {
+                $errorText = $exceptionProperty.Value.description
+            }
+        }
+        Write-Host "Spotify JavaScript failed: $errorText" -ForegroundColor Red
+    }
+
+    $resultValue = $result.PSObject.Properties['result']
+    if (-not $resultValue -or -not $resultValue.Value) {
+        return $null
+    }
+
+    $valueProperty = $resultValue.Value.PSObject.Properties['value']
+    if ($valueProperty) {
+        return $valueProperty.Value
+    }
+
+    return $null
 }
 
 # ============================================================
@@ -507,21 +550,9 @@ function Set-SpotifyVolume {
 # ============================================================
 
 function Test-SpotifyQueueOpen {
-
-    return [bool](Invoke-SpotifyJS -Script @'
-(() => {
-
-    // When queue is open Spotify literally renders "Recently played",
-    // "Now playing", "Next from:", etc.
-
-    const text = document.body.innerText || '';
-
-    return (
-        text.includes('Recently played') &&
-        text.includes('Now playing') &&
-        text.includes('Next from:')
-    );
-})()
+    return [bool](Invoke-SpotifyDOM -Body @'
+const panel = document.getElementById('queue-panel');
+return !!panel && visible(panel);
 '@)
 }
 
@@ -532,16 +563,10 @@ function Open-SpotifyQueue {
         return
     }
 
-    $result = Invoke-SpotifyJS @'
-(() => {
-    const el = document.querySelector('button[aria-label="Queue"]');
-
-    if (!el)
-        return "NOT_FOUND";
-
-    el.click();
-    return "OK";
-})()
+    $result = Invoke-SpotifyDOM -Body @'
+const button = buttonByName('Queue');
+if (!button) return "NOT_FOUND";
+return clickEl(button) ? "OK" : "NOT_FOUND";
 '@
 
     if ($result -ne "OK") {
@@ -556,16 +581,10 @@ function Close-SpotifyQueue {
         return
     }
 
-    $result = Invoke-SpotifyJS @'
-(() => {
-    const el = document.querySelector('button[aria-label="Queue"]');
-
-    if (!el)
-        return "NOT_FOUND";
-
-    el.click();
-    return "OK";
-})()
+    $result = Invoke-SpotifyDOM -Body @'
+const button = buttonByName('Queue');
+if (!button) return "NOT_FOUND";
+return clickEl(button) ? "OK" : "NOT_FOUND";
 '@
 
     if ($result -ne "OK") {
@@ -574,7 +593,6 @@ function Close-SpotifyQueue {
 }
 
 
-#broken
 function Get-SpotifyQueueSongs {
 
     $wasOpen = Test-SpotifyQueueOpen
@@ -584,20 +602,43 @@ function Get-SpotifyQueueSongs {
         Start-Sleep -Milliseconds 250
     }
 
-    $songs = Invoke-SpotifyJS -Script @'
-(() => {
+    $songs = Invoke-SpotifyDOM -Body @'
+return (() => {
 
     // Queue tracks expose buttons like:
     // "Play Sleepwalker ... by akiaura, LONOWN, STM"
 
-    const buttons = [...document.querySelectorAll('button')];
+    const panel = document.querySelector('#queue-panel');
+    if (!panel) return [];
 
-    const songs = buttons
-        .map(b => b.getAttribute('aria-label') || '')
-        .filter(name => /^Play .+ by .+/.test(name))
-        .map(name => name.replace(/^Play /, ''));
+    const headingText = node => [...node.querySelectorAll(
+        'h1,h2,h3,h4,[role="heading"]'
+    )].map(accName).join(' ');
 
-    return [...new Set(songs)];
+    const isQueueSection = button => {
+        let node = button;
+        for (let depth = 0; node && node !== panel && depth < 8; depth++, node = node.parentElement) {
+            const text = headingText(node);
+            if (/Recently played|Now playing/i.test(text)) return false;
+            if (/Next in queue|Next from:/i.test(text)) return true;
+        }
+        return null;
+    };
+
+    const buttons = [...panel.querySelectorAll('button,[role="button"]')]
+        .filter(visible)
+        .map(button => ({
+            button,
+            label: norm(button.getAttribute('aria-label'))
+        }))
+        .filter(item => /^Play .+/i.test(item.label));
+
+    const marked = buttons.filter(item => isQueueSection(item.button) === true);
+    const scoped = marked.length
+        ? marked
+        : buttons.filter(item => isQueueSection(item.button) !== false);
+
+    return [...new Set(scoped.map(item => item.label.replace(/^Play /i, '')))];
 })()
 '@
 
@@ -627,7 +668,7 @@ return !!document.getElementById('Desktop_LeftSidebar_Id');
 
 
 
-#### THIS DOES WORK FOR LIBRARY BUT NOT GENERAL SEARCHING 
+# Search the library first, then fall back to Spotify's main search.
 function Play-SpotifyPlaylist {
 
     param(
@@ -637,23 +678,28 @@ function Play-SpotifyPlaylist {
 
     $nameJson = $PlaylistName | ConvertTo-Json -Compress
 
-    $searched = Invoke-SpotifyJS -Script @"
-(() => {
+    $searched = Invoke-SpotifyDOM -Body @"
+return (() => {
 
-    const input = document.querySelector('input[role="searchbox"]');
+    const input = document.querySelector(
+        'input[role="searchbox"], input[role="combobox"]'
+    );
 
     if (!input)
         return false;
 
-    const setter = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        'value'
-    ).set;
-
-    setter.call(input, $nameJson);
-
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    setNativeValue(input, $nameJson);
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        bubbles: true
+    }));
+    input.dispatchEvent(new KeyboardEvent('keyup', {
+        key: 'Enter',
+        code: 'Enter',
+        bubbles: true
+    }));
 
     return true;
 })()
@@ -663,52 +709,79 @@ function Play-SpotifyPlaylist {
         Write-Host "Library search input not found."  -ForegroundColor Red
     }
 
-    Start-Sleep -Milliseconds 300
+    # Spotify updates its search results asynchronously after the input event.
+    Start-Sleep -Milliseconds 1500
 
-    $result = Invoke-SpotifyJS -Script @'
-(() => {
+    $libraryResult = Invoke-SpotifyDOM -Body @"
+return (() => {
 
     const library = document.querySelector('#Desktop_LeftSidebar_Id');
 
     if (!library)
         return "LIBRARY_NOT_FOUND";
 
-    const buttons = [...library.querySelectorAll('button')];
+    const query = $nameJson.toLowerCase();
+    const buttons = [...library.querySelectorAll('button,[role="button"]')]
+        .filter(visible)
+        .map(button => ({
+            button,
+            label: norm(button.getAttribute('aria-label')),
+            text: norm(button.innerText || button.textContent)
+        }))
+        .filter(item => /^(Play|Pause) .+/i.test(item.label));
 
-    const button = buttons.find(b => {
-        const aria = b.getAttribute('aria-label') || '';
+    const match = buttons.find(item =>
+        (item.label + ' ' + item.text).toLowerCase().includes(query)
+    );
 
-        return (
-            aria.startsWith('Play ') ||
-            aria.startsWith('Pause ')
-        );
-    });
+    if (!match) return "NO_RESULT";
+    if (/^Pause /i.test(match.label)) return "ALREADY_PLAYING";
 
-    if (!button)
-        return "NO_RESULT";
-
-    const aria = button.getAttribute('aria-label') || '';
-
-    if (aria.startsWith('Pause '))
-        return "ALREADY_PLAYING";
-
-    button.click();
-
-    return aria;
+    match.button.click();
+    return match.label;
 })()
-'@
+"@
 
-    if ($result -eq "LIBRARY_NOT_FOUND") {
-        Write-Host "Spotify library not found."  -ForegroundColor Red
+    if ($libraryResult -eq "ALREADY_PLAYING") { return $libraryResult }
+    if ($libraryResult -ne "LIBRARY_NOT_FOUND" -and $libraryResult -ne "NO_RESULT") {
+        return $libraryResult
+    }
+
+    # Fall back to Spotify's main search results when the library has no match.
+    Start-Sleep -Milliseconds 300
+    $mainResult = Invoke-SpotifyDOM -Body @"
+return (() => {
+    const library = document.querySelector('#Desktop_LeftSidebar_Id');
+    const controls = byName('Player controls');
+    const buttons = [...document.querySelectorAll('button,[role="button"]')]
+        .filter(visible)
+        .filter(button => !library?.contains(button) && !controls?.contains(button))
+        .map(button => ({
+            button,
+            label: norm(button.getAttribute('aria-label')),
+            text: norm(button.innerText || button.textContent)
+        }))
+        .filter(item => /^(Play|Pause)( .+)?$/i.test(item.label));
+
+    const query = $nameJson.toLowerCase();
+    const match = buttons.find(item =>
+        (item.label + ' ' + item.text).toLowerCase().includes(query)
+    ) || buttons[0];
+
+    if (!match) return "NO_MAIN_RESULT";
+    if (/^Pause /i.test(match.label)) return "ALREADY_PLAYING";
+
+    match.button.click();
+    return match.label;
+})()
+"@
+
+    if ($mainResult -eq "NO_MAIN_RESULT") {
+        Write-Host "No Spotify library or main-search result found for '$PlaylistName'." -ForegroundColor Red
         return
     }
 
-    if ($result -eq "NO_RESULT") {
-        Write-Host "No playlist result found for '$PlaylistName'."  -ForegroundColor Red
-        return
-    }
-
-    return $result
+    return $mainResult
 }
 
 
@@ -777,4 +850,42 @@ return {
     }
 }
 
-# search doesnt work
+# ============================================================
+# LUCY-MUSIC COMMAND NAMES
+# ============================================================
+
+# Keep the original names working while providing one consistent command prefix.
+@(
+    'Get-SpotifyExecutable',
+    'Test-SpotifyCDP',
+    'Start-SpotifyCDP',
+    'Get-SpotifyCDPTarget',
+    'Initialize-SpotifyCDP',
+    'Invoke-SpotifyCDPCommand',
+    'Invoke-SpotifyJS',
+    'Invoke-SpotifyDOM',
+    'Get-SpotifyPlayerControlsInternal',
+    'Find-SpotifyPlayerButtonInternal',
+    'Get-SpotifyPlaybackState',
+    'Toggle-SpotifyPlayPause',
+    'Play-Spotify',
+    'Pause-Spotify',
+    'Next-SpotifyTrack',
+    'Previous-SpotifyTrack',
+    'Get-SpotifyNowPlayingNamesInternal',
+    'Get-SpotifyCurrentSong',
+    'Get-SpotifyCurrentArtist',
+    'Get-SpotifyCurrentContext',
+    'Get-SpotifyCurrentPlaylist',
+    'Get-SpotifyVolume',
+    'Set-SpotifyVolume',
+    'Test-SpotifyQueueOpen',
+    'Open-SpotifyQueue',
+    'Close-SpotifyQueue',
+    'Get-SpotifyQueueSongs',
+    'Get-SpotifyLibraryRootInternal',
+    'Play-SpotifyPlaylist',
+    'Get-SpotifyStatus'
+) | ForEach-Object {
+    Set-Alias -Name "Lucy-Music-$_" -Value $_ -Scope Global
+}

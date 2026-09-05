@@ -1,0 +1,53 @@
+// 1. Setup Camera & Load Texture
+Camera3D camera = { 0 };
+camera.position = (Vector3){ 0.0f, 3.0f, 5.0f };
+camera.target = (Vector3){ 0.0f, 0.8f, 0.0f };
+camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+camera.fovy = 45.0f;
+camera.projection = CAMERA_PERSPECTIVE;
+
+// Load real image texture for display screen
+Texture2D screenTexture = LoadTexture("wallpaper.png");
+
+// 2. Render Loop Execution
+BeginDrawing();
+    ClearBackground(LIGHTGRAY);
+    BeginMode3D(camera);
+
+        // --- BASE / BOTTOM CHASSIS ---
+        // Main Aluminum Body
+        DrawCube((Vector3){ 0.0f, 0.05f, 0.0f }, 3.0f, 0.1f, 2.0f, LIGHTGRAY);
+        DrawCubeWires((Vector3){ 0.0f, 0.05f, 0.0f }, 3.0f, 0.1f, 2.0f, DARKGRAY);
+
+        // Keyboard Well (Recessed Area)
+        DrawCube((Vector3){ 0.0f, 0.11f, -0.2f }, 2.6f, 0.01f, 1.0f, DARKGRAY);
+        // Trackpad
+        DrawCube((Vector3){ 0.0f, 0.11f, 0.6f }, 0.8f, 0.01f, 0.5f, GRAY);
+
+        // --- DISPLAY LID (OPENED AT ~110 DEGREES) ---
+        rlPushMatrix();
+            // Pivot at hinge center back
+            rlTranslatef(0.0f, 0.1f, -1.0f);
+            rlRotatef(-20.0f, 1.0f, 0.0f, 0.0f); // Tilt back angle
+
+            // Aluminum Screen Backing & Bezel
+            DrawCube((Vector3){ 0.0f, 1.0f, 0.0f }, 3.0f, 2.0f, 0.06f, LIGHTGRAY);
+            DrawCube((Vector3){ 0.0f, 1.0f, 0.02f }, 2.9f, 1.9f, 0.04f, BLACK); // Bezel
+
+            // Real Image Screen Display (Texture Quad)
+            rlSetTexture(screenTexture.id);
+            rlBegin(RL_QUADS);
+                rlColor4ub(255, 255, 255, 255);
+                rlNormal3f(0.0f, 0.0f, 1.0f);
+                
+                rlTexCoord2f(0.0f, 1.0f); rlVertex3f(-1.35f, 0.15f, 0.05f); // Bottom-Left
+                rlTexCoord2f(1.0f, 1.0f); rlVertex3f( 1.35f, 0.15f, 0.05f); // Bottom-Right
+                rlTexCoord2f(1.0f, 0.0f); rlVertex3f( 1.35f, 1.85f, 0.05f); // Top-Right
+                rlTexCoord2f(0.0f, 0.0f); rlVertex3f(-1.35f, 1.85f, 0.05f); // Top-Left
+            rlEnd();
+            rlSetTexture(0);
+
+        rlPopMatrix();
+
+    EndMode3D();
+EndDrawing();
