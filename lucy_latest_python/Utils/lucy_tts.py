@@ -1,7 +1,6 @@
 # only important EXACTLY what we need instead of entire modules.
 from pyttsx3 import init
-from sys import platform
-
+from sys import argv
 def speak(text, rate=150, voice_actor="zira"):
     try:
         engine = init()
@@ -28,3 +27,9 @@ def speak(text, rate=150, voice_actor="zira"):
     except Exception as e:
         print(f"Error in TTS: {e}")
 
+
+
+if __name__ == "__main__":
+    if len(argv) > 1:
+        # sys.argv[1] contains the complete data["text"] string
+        speak(argv[1])

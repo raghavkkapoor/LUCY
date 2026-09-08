@@ -5,9 +5,9 @@ import socket
 import subprocess
 import time
 import urllib.request
-from Utils.lucy_logging import log, LogColors
-from preview_window_helper import make_process_window_click_through
-from Utils.Constants import GEMINI_GEM_URL, CHROME_ACCOUNT_PAGE
+# dont remove the . for relative import here keep it this way 
+from .lucy_logging import log, LogColors
+from .preview_window_helper import make_process_window_click_through
 
 def is_cdp_port_active(port):
     """Utility to test if a CDP endpoint is responsive on a given port."""
@@ -120,7 +120,7 @@ def launch_lucy_chrome(preferred_port=9223):
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile_dir}",
         "--profile-directory=Default",
-        # f"--app=https://example.com/" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
+        f"--app=https://example.com/" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
     ]
     
     proc = subprocess.Popen(args)

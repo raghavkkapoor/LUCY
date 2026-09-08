@@ -1,11 +1,15 @@
 import time
 from playwright.sync_api import expect, sync_playwright, Error as PlaywrightError
-from ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
-from Utils.lucy_logging import log, LogColors
-from concurrent.futures import ProcessPoolExecutor, TimeoutError
-import task_runner
-import Utils.Constants as Constants
-from better_sys_prompt import system_instruction, user_prompt_prefix
+from utils.ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
+from utils.lucy_logging import log, LogColors
+import utils.Constants as Constants
+import subprocess
+import sys
+import re
+import ast
+
+
+
 
 
 # -----------------------------------------------------------------------------
@@ -13,10 +17,6 @@ from better_sys_prompt import system_instruction, user_prompt_prefix
 # Keep the complete Playwright locator expressions centralized here so each
 # target can be replaced in one place if LLM / Chrome UI markup changes.
 # -----------------------------------------------------------------------------
-SYSTEM_PROMPT_MARKER = lambda page: page.get_by_text(
-    system_instruction
-)
-
 PRIMARY_CODE_BLOCKS = lambda container: container.locator("pre code, code-block code")
 FALLBACK_CODE_BLOCKS = lambda container: container.locator("code")
 
@@ -85,23 +85,66 @@ RESPONSE_TURNS = SELECTORS["RESPONSE_TURNS"]
 llm_url = SELECTORS["LLM_URL"]
 
 
+user_prompt_prefix = "I'm trying to test something can you give me python code that helps me with "
 
-def run_python_code(script_content: str, max_runtime: float = 300.0) -> str:
-    with ProcessPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(task_runner.execute_code, script_content)
+user_prompt_suffix = " - ignore all this if the output helped me with my request and just say 'idle'"
 
+import ast
+import subprocess
+import sys
+import re
+import psutil
+
+def run_python_code(script_content: str, max_runtime: float = 120.0) -> str:
+    try:
+        tree = ast.parse(script_content)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'input':
+                return "taking input from the user is restricted in this sandbox environment"
+    except SyntaxError:
+        pass
+
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-c", script_content],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
         try:
-            return future.result(timeout=max_runtime)
+            stdout, stderr = process.communicate(timeout=max_runtime)
+        except subprocess.TimeoutExpired:
+            try:
+                parent = psutil.Process(process.pid)
+                parent.kill()
+                psutil.wait_procs([parent], timeout=5)
+            except psutil.NoSuchProcess:
+                pass
+            return "Script timed out and took forever."
 
-        except TimeoutError:
-            return (
-                f"EXECUTION_STATUS=FAILED\n"
-                f"COMMAND_EXIT_CODE=124\n"
-                f"ERROR_TYPE=TimeoutError\n"
-                f"ERROR_LINE=Unknown\n"
-                f"FULL_TRACEBACK:\n"
-                f"Command exceeded max runtime of {max_runtime}s."
-            )
+        if process.returncode != 0:
+            line_match = re.search(r'line (\d+)', stderr)
+            script_lines = script_content.splitlines()
+            offending_line = "unknown"
+            if line_match:
+                line_idx = int(line_match.group(1)) - 1
+                if 0 <= line_idx < len(script_lines):
+                    offending_line = script_lines[line_idx].strip()
+            
+            stderr_lines = [l.strip() for l in stderr.strip().split('\n') if l.strip()]
+            error_type = "Error"
+            if stderr_lines:
+                last_line = stderr_lines[-1]
+                error_type = last_line.split(':')[0] if ':' in last_line else last_line
+                
+            return f"{error_type} at statement: '{offending_line}'"
+            
+        combined_output = f"{stdout}{stderr}".strip()
+        return combined_output if combined_output else "Could you verify if that worked? I can't tell since there's no output."
+        
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 
 def connect_to_LLM(p, endpoint_url):
@@ -135,19 +178,7 @@ def connect_to_LLM(p, endpoint_url):
 
     page.wait_for_timeout(2000) # give the page some time to load and render the UI elements
 
-    log(f"Connected to LLM.", LogColors.GREEN)
-
-    system_prompt_exists = (SYSTEM_PROMPT_MARKER(page).count() > 0)
-
-    if not system_prompt_exists:
-        send_request(
-            page,
-            f"{system_instruction}"
-        )
-
-        log(f"Preloaded system instructions.", LogColors.GREEN)
-    else:
-        log(f"Skipped preloading system instructions. They already exist in context.", LogColors.CYAN)
+    log(f"Connected to {LLM_SELECTED}.", LogColors.GREEN)
 
     return {
         "browser": browser,
@@ -254,13 +285,14 @@ def extract_code(page):
         blocks = FALLBACK_CODE_BLOCKS(newest)
             
     if blocks.count() == 0:
+        
         raise RuntimeError(
-            "No code block found."
+            "Put 'idle' in a code block please if we are done."
         )
 
     if blocks.count() > 1:
         raise RuntimeError(
-            "Returned multiple code blocks. Only 1 is supported."
+            "Just give me 1 code block please."
         )
 
     return blocks.first.inner_text(
@@ -268,14 +300,14 @@ def extract_code(page):
     ).strip()
 
 
-def handle_result(code):
-    if code.lower().strip().strip('"').strip("'") == "idle":
-        return None
-
-    return run_python_code(code)
-
-
 def main():
+
+#     out = run_python_code("""name = input("Enter your name: ")
+# print(f"Hi, {name}! Your Python test was successful.")""")
+#     print(out)
+#     exit(0)
+
+
     try:
         chrome_state = launch_lucy_chrome(
             preferred_port=Constants.PORT
@@ -312,7 +344,7 @@ def main():
         if not initial_request:
             return
 
-        request =  f"{user_prompt_prefix}{initial_request}"
+        request =  f"{user_prompt_prefix}{initial_request}{user_prompt_suffix}"
 
         while True:
             try:
@@ -355,7 +387,7 @@ def main():
                     if not check_for_next_request:
                         break
 
-                    request = f"{user_prompt_prefix}{check_for_next_request}"
+                    request = f"{user_prompt_prefix}{check_for_next_request}{user_prompt_suffix}"
 
                     continue
 
@@ -408,10 +440,7 @@ def main():
                     LogColors.RED
                 )
 
-                request = (
-                    "The execution engine encountered this error:\n"
-                    f"{str(e)}"
-                )
+                request = (str(e))
 
                 time.sleep(2)
                 continue
@@ -424,5 +453,4 @@ if __name__ == "__main__":
 # saving this shit for later
 # number of user sent prompts (how many messages we sent)
 # page.locator("user-query-content").count()
-
 

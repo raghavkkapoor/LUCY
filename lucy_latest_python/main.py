@@ -1,7 +1,15 @@
+
+from utils.lucy_logging import log, LogColors
+from utils.lucy_command_search import process_input
+from utils.find_anything import process_multi_search
+from utils.CloseLucyBrowser9223 import kill_cdp_browser
+from utils.ChromeCdpManager import launch_lucy_chrome
 import ctypes
 import customtkinter as ctk
+import sys
 import keyboard
-from Utils.lucy_command_search import process_input
+import signal
+
 
 APP_BG_COLOR = "#04082D"
 
@@ -15,9 +23,9 @@ try:
         r"Lucy-fonts\GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf"
     )
 except Exception as e:
-    print(f"[WARNING] Could not load font: {e}")
+    log(f"[WARNING] Could not load font: {e}", LogColors.YELLOW)
 
-ctk.set_appearance_mode("Dark")
+# ctk.set_appearance_mode("Dark")
 
 app = ctk.CTk()
 app.title("LUCY")
@@ -42,6 +50,27 @@ pos_y = 150
 
 app.geometry(f"{app_window_width}x{app_window_height}+{pos_x}+{pos_y}")
 
+def handle_cleanup():
+    log("Cleaning up...", LogColors.GREEN)
+    try:
+        kill_cdp_browser()
+        log("Closed CDP browser instance...", LogColors.GREEN) 
+    except Exception as e:
+        log(f"Cleanup browser error: {e}", LogColors.RED)
+
+    app.destroy()
+
+    sys.exit(0)
+
+# 1. Define what happens when Ctrl+C is pressed in the terminal
+signal.signal(signal.SIGINT, lambda sig, frame: handle_cleanup())
+
+# 2. Keep-alive timer to allow Python to intercept terminal signals
+def allow_signals():
+    app.after(500, allow_signals)
+
+app.after(500, allow_signals)
+
 # ---------------------------------------------------------
 # VISIBILITY & HOTKEY LOGIC
 # ---------------------------------------------------------
@@ -63,6 +92,9 @@ def toggle_window(app_handle, input_entry):
 # DYNAMIC RESIZING & LOGGING
 # ---------------------------------------------------------
 BASE_INPUT_HEIGHT = 45
+# THIS COMMANDS DIRECTORY WILL BE A SERVER INSTEAD OF LOCALLY STORED SCRIPTS
+COMMANDS_ROOT_DIR = r"C:\Users\ragha\OneDrive\Desktop\LUCY\lucy_latest_python\POWERSHELL_DEBUG_SCRIPTS"
+MAX_SEARCH_RESULTS = 200
 
 def on_input_change(event=None):
     content = repr(textbox.get("1.0", "end-1c"))
@@ -71,7 +103,9 @@ def on_input_change(event=None):
         return
 
 
-    process_input(content, r"C:\Users\ragha\OneDrive\Desktop\LUCY\old_lucy_reference[ARCHIVED]\POWERSHELL_DEBUG_SCRIPTS", limit=5)
+    # process_input(content, COMMANDS_ROOT_DIR, limit=MAX_SEARCH_RESULTS)
+    process_multi_search(content, limit=MAX_SEARCH_RESULTS)
+
 
     num_lines = content.count("\n") + 1
     chars_per_line = 38
@@ -182,8 +216,35 @@ container.bind("<Button-1>", clear_focus_on_bg, add="+")
 textbox.bind("<KeyRelease>", on_input_change)
 
 app.bind("<Escape>", lambda event: toggle_window(app_handle=app, input_entry=textbox))
+
 keyboard.add_hotkey(
     "win+space", lambda: app.after(0, toggle_window, app, textbox)
 )
 
+
+chrome = launch_lucy_chrome()
+endpoint_url = chrome["url"]
+
+# MAIN GUI CALL
 app.mainloop()
+
+
+
+
+
+# Type of requests:
+
+# FIRST: NAVIGATE MYBCIT AND LEARNING HUB.
+
+# 1. Send and receive email.
+# 2. Summerized web search about a topic.
+# 3. Detailed web search about a topic.
+# 5. Create alarms and reminders.
+# 6. Playing any song/playlist (handling basic playback).
+# 7. Get every calendar event and ready to retrieve on demand. Automatically remind the user if an event is coming up without asking to "remind" them.
+# 8. Pull up any image(s) about something from the web.
+# 9. Open any website.
+# 10. Open any app.
+# 11. Know my youtube search history to pull relative past info on demand
+
+# TODO: PERFORM INTENT CLASSIFICATION ON THE UTILS DIRECTORY USING: Zero-Shot Text Classification

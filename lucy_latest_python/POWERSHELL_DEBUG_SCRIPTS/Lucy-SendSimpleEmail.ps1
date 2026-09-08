@@ -10,7 +10,7 @@ param (
     [string]$AttachmentPath,
 
     [Parameter(Mandatory = $false)]
-    [string]$To = "raghavkkapoor7seller@gmail.com",
+    [string]$To = "akshaykkapoor@gmail.com",
 
     [Parameter(Mandatory = $false)]
     [string]$From = "raghavkkapoor7@gmail.com",
