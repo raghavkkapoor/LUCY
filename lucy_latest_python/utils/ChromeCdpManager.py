@@ -84,7 +84,7 @@ def launch_lucy_chrome(preferred_port=9223):
     # 1. Check if an instance is already running
     existing_instance = get_running_lucy_chrome()
     if existing_instance:
-        log(f"\nLUCY:\nLucy Chrome already running.\nPort:    {existing_instance['Port']}\nProfile: {existing_instance['ProfileDir']}\n", LogColors.YELLOW)
+        log(f"Lucy's browser is already running.\nPort:    {existing_instance['Port']}\nProfile: {existing_instance['ProfileDir']}\n", LogColors.YELLOW)
         
         with open(state_file, "w", encoding="utf-8") as f:
             json.dump(existing_instance, f, indent=2)
@@ -120,7 +120,7 @@ def launch_lucy_chrome(preferred_port=9223):
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile_dir}",
         "--profile-directory=Default",
-        f"--app=https://example.com/" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
+        # f"--app=https://example.com/" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
     ]
     
     proc = subprocess.Popen(args)

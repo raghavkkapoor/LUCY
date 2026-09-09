@@ -1,15 +1,58 @@
+
+
+
+
+
+
+
+
+
+
+
+
+import sys
+# Ensure LUCY root directory is in sys.path for gemini_usage import
+lucy_root = r"C:\Users\ragha\OneDrive\Desktop\LUCY"
+if lucy_root not in sys.path:
+    sys.path.insert(0, lucy_root)
+
+try:
+    from gemini_usage import get_gemini_usage
+except ImportError:
+    get_gemini_usage = None
+
 import time
 from playwright.sync_api import expect, sync_playwright, Error as PlaywrightError
 from utils.ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
 from utils.lucy_logging import log, LogColors
 import utils.Constants as Constants
 import subprocess
-import sys
 import re
 import ast
+from utils.lucy_tts import speak
+import psutil
 
 
+def check_usage_and_warn(usage_page):
+    if not get_gemini_usage:
+        print("[Usage Monitor] gemini_usage module not available. Skipping check.")
+        return
 
+    try:
+        print("[Usage Monitor] Checking Gemini usage metrics...")
+        usage_data = get_gemini_usage(usage_page)
+        current_usage_str = int(usage_data.get("daily_usage_remaining"))
+        if current_usage_str:
+            if current_usage_str > 80:
+                print(f"\033[93m[WARNING] You are reaching the selected LLM's limits! Current usage is at {current_usage_str}%.\033[0m")
+                print("[Usage Monitor] Exiting script execution due to high usage limits.")
+                sys.exit(0)
+            else:
+                print(f"[Usage Monitor] Usage is safe ({current_usage_str}%). Proceeding...")
+        else:
+            print("[Usage Monitor] Could not parse numeric usage percentage. Proceeding...")
+    except Exception as e:
+        print(f"[Usage Monitor Error] Failed to retrieve usage metrics: {e}")
 
 
 # -----------------------------------------------------------------------------
@@ -85,15 +128,15 @@ RESPONSE_TURNS = SELECTORS["RESPONSE_TURNS"]
 llm_url = SELECTORS["LLM_URL"]
 
 
-user_prompt_prefix = "I'm trying to test something can you give me python code that helps me with "
 
-user_prompt_suffix = " - ignore all this if the output helped me with my request and just say 'idle'"
 
-import ast
-import subprocess
-import sys
-import re
-import psutil
+user_prompt_prefix = "Can you pass me python code that helps me with '"
+
+user_prompt_suffix = "'? - When browsing use playwright 9223 instance already running and never modify the gemini/app or /usage tabs. Every script on my machine has a physical timeout of 2 mins max so be careful. I'll let you know if there's any errors so keep giving me code until I dealt with this. Be curious and continously try new things,  work on the problem, fix it, improve it, repeat until I say stop. You dont stop until I say so."
+
+
+
+
 
 def run_python_code(script_content: str, max_runtime: float = 120.0) -> str:
     try:
@@ -167,23 +210,30 @@ def connect_to_LLM(p, endpoint_url):
 
     context = browser.contexts[0]
 
-    if not context.pages:
-        page = context.wait_for_event("page")
-    else:
-        page = context.pages[0]
+    all_pages = context.pages
 
-    if not page.url.startswith(llm_url):
-        page.goto(llm_url, wait_until="domcontentloaded")
+    chat_page = None
 
+    for page in all_pages:
+        if page.url.startswith(llm_url):
+            chat_page = page
+            break
 
-    page.wait_for_timeout(2000) # give the page some time to load and render the UI elements
+    if chat_page is None:
+        # no llm session found
+        # open session in new page
+        chat_page = context.new_page()
+        chat_page.goto(llm_url, wait_until="domcontentloaded")
+        chat_page.wait_for_timeout(2000) # give the page some time to load and render the UI elements
+
+    chat_page.bring_to_front()
 
     log(f"Connected to {LLM_SELECTED}.", LogColors.GREEN)
 
     return {
         "browser": browser,
         "context": context,
-        "page": page,
+        "page": chat_page,
         "endpoint_url": endpoint_url
     }
 
@@ -232,6 +282,8 @@ def wait_for_ready(page):
 
 def send_request(page, request):
 
+    page.bring_to_front()
+
     wait_for_ready(page)
 
     composer = COMPOSER(page)
@@ -271,28 +323,25 @@ def send_request(page, request):
         )
 
 
-def extract_code(page):
+def extracted_code(page):
     wait_for_ready(page)
 
     turns = RESPONSE_TURNS(page)
     if turns.count() == 0:
-        raise RuntimeError("No model response found.")
-            
+        raise RuntimeError("You forgot to respond.")
+ 
     newest = turns.nth(turns.count() - 1)
+
     blocks = PRIMARY_CODE_BLOCKS(newest)
-        
     if blocks.count() == 0:
         blocks = FALLBACK_CODE_BLOCKS(newest)
-            
-    if blocks.count() == 0:
-        
-        raise RuntimeError(
-            "Put 'idle' in a code block please if we are done."
-        )
-
+        if blocks.count() == 0:
+            if ("lucy_done_3030" in newest.inner_html().lower()):
+                return "lucy_done_3030"
+    
     if blocks.count() > 1:
         raise RuntimeError(
-            "Just give me 1 code block please."
+            "Just give me 1 code block."
         )
 
     return blocks.first.inner_text(
@@ -301,13 +350,6 @@ def extract_code(page):
 
 
 def main():
-
-#     out = run_python_code("""name = input("Enter your name: ")
-# print(f"Hi, {name}! Your Python test was successful.")""")
-#     print(out)
-#     exit(0)
-
-
     try:
         chrome_state = launch_lucy_chrome(
             preferred_port=Constants.PORT
@@ -322,7 +364,6 @@ def main():
         )
         return
 
-
     if not is_cdp_port_active(Constants.PORT):
         log(
             f"Browser unreachable. Exiting.",
@@ -336,10 +377,28 @@ def main():
             endpoint_url
         )
 
+        # Open or reuse dedicated usage monitoring tab (prevent duplicates)
+        usage_page = None
+        for p_tab in state["context"].pages:
+            if "gemini.google.com/usage" in p_tab.url:
+                usage_page = p_tab
+                break
+        if not usage_page:
+            usage_page = state["context"].new_page()
+            usage_page.goto("https://gemini.google.com/usage", wait_until="domcontentloaded")
+            usage_page.wait_for_timeout(2000)
 
-        initial_request = input(
+        # bring main llm session page to front.
+        state["page"].bring_to_front()
+
+        # Check usage before initial request
+        check_usage_and_warn(usage_page)
+
+        initial_request_log = print(
             "Enter a task/goal to achieve: "
-        ).strip()
+        )
+
+        initial_request = sys.stdin.read().strip()
 
         if not initial_request:
             return
@@ -357,6 +416,9 @@ def main():
                         "Try again."
                     )
 
+                # Check usage before sending request in loop
+                check_usage_and_warn(usage_page)
+
                 send_request(
                     state["page"],
                     request
@@ -368,21 +430,22 @@ def main():
                 )
 
 
-                code = extract_code(
+                response = extracted_code(
                     state["page"]
                 )
 
-
-                if code.lower().strip() == "idle":
-
+                if "lucy_done_3030" in response.lower().strip():
                     log(
                         f"Job Finished. Idling...",
                         LogColors.GRAY
                     )
-
-                    check_for_next_request = input(
+                    # TODO add multi-line input here as well
+                    check_for_next_request_log = print(
                         "Enter next task: "
-                    ).strip()
+                    )
+
+                    check_for_next_request = sys.stdin.read().strip()
+                    
 
                     if not check_for_next_request:
                         break
@@ -391,14 +454,15 @@ def main():
 
                     continue
 
-
-                request = run_python_code(code)
+            
+                request = run_python_code(response)
 
                 log(
                     f"OUTPUT:\n{request}",
                     LogColors.CYAN
                 )
-                time.sleep(2)
+
+                time.sleep(4) # increase delay to trottle usage for chatgpt
                 continue
 
 
@@ -424,14 +488,24 @@ def main():
 
 
             except KeyboardInterrupt:
-
                 log(
                     f"Interrupted by user.",
                     LogColors.RED
                 )
 
-                p.stop()
-                break
+                try:
+                    if 'state' in locals() and 'page' in state and is_generating(state["page"]):
+                        log("Stopping active Gemini generation...", LogColors.YELLOW)
+                        STOP_RESPONSE_BUTTON(state["page"]).click(timeout=3000)
+                except Exception as ex:
+                    log(f"Could not stop generation on exit: {ex}", LogColors.YELLOW)
+
+                try:
+                    p.stop()
+                except Exception:
+                    pass
+
+                sys.exit(0)
 
             except Exception as e:
 
