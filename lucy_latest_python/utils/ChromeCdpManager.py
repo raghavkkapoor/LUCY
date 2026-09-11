@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import re
 import socket
 import subprocess
@@ -7,7 +8,21 @@ import time
 import urllib.request
 # dont remove the . for relative import here keep it this way 
 from .lucy_logging import log, LogColors
-from .preview_window_helper import make_process_window_click_through
+from .preview_window_helper import move_window_offscreen, render_window_preview
+
+
+def apply_stealth_mode():
+    # Turn into preview window and hide it
+    name = move_window_offscreen()
+
+    # Launch Tkinter preview window in a non-blocking background thread
+    preview_thread = threading.Thread(
+        target=render_window_preview,
+        args=(name,),
+        daemon=True
+    )
+    preview_thread.start()
+
 
 def is_cdp_port_active(port):
     """Utility to test if a CDP endpoint is responsive on a given port."""
@@ -88,6 +103,8 @@ def launch_lucy_chrome(preferred_port=9223):
         
         with open(state_file, "w", encoding="utf-8") as f:
             json.dump(existing_instance, f, indent=2)
+
+        apply_stealth_mode()
             
         return existing_instance
 
@@ -137,8 +154,6 @@ def launch_lucy_chrome(preferred_port=9223):
         log("\nLUCY:\nError: Chrome launched, but CDP failed to become available.\n", LogColors.RED)
         raise RuntimeError("Chrome launched, but CDP failed to become available.")
 
-    # turn into preview window for now
-    # make_process_window_click_through(proc.pid)
 
     # 6. Save state file
     state = {
@@ -152,6 +167,8 @@ def launch_lucy_chrome(preferred_port=9223):
     with open(state_file, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
+
+    apply_stealth_mode()
 
     log("\nLUCY:\nLucy Chrome ready.\n", LogColors.GREEN)
 

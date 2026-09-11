@@ -1,43 +1,29 @@
-
-
-
-
-
-
-
-
-
-
-
-
+# Standard imports
 import sys
-# Ensure LUCY root directory is in sys.path for gemini_usage import
-lucy_root = r"C:\Users\ragha\OneDrive\Desktop\LUCY"
-if lucy_root not in sys.path:
-    sys.path.insert(0, lucy_root)
-
-try:
-    from gemini_usage import get_gemini_usage
-except ImportError:
-    get_gemini_usage = None
-
 import time
+import json
+import queue
+import threading
+from datetime import datetime
+from pathlib import Path
+import subprocess
+import re
+import ast
+import psutil
+
+# Util imports
+from utils.CloseLucyBrowser9223 import kill_cdp_browser
+from utils.gemini_usage import get_gemini_usage
 from playwright.sync_api import expect, sync_playwright, Error as PlaywrightError
 from utils.ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
 from utils.lucy_logging import log, LogColors
 import utils.Constants as Constants
-import subprocess
-import re
-import ast
-from utils.lucy_tts import speak
-import psutil
 
 
 def check_usage_and_warn(usage_page):
     if not get_gemini_usage:
         print("[Usage Monitor] gemini_usage module not available. Skipping check.")
         return
-
     try:
         print("[Usage Monitor] Checking Gemini usage metrics...")
         usage_data = get_gemini_usage(usage_page)
@@ -54,14 +40,6 @@ def check_usage_and_warn(usage_page):
     except Exception as e:
         print(f"[Usage Monitor Error] Failed to retrieve usage metrics: {e}")
 
-
-# -----------------------------------------------------------------------------
-# DOM locators
-# Keep the complete Playwright locator expressions centralized here so each
-# target can be replaced in one place if LLM / Chrome UI markup changes.
-# -----------------------------------------------------------------------------
-PRIMARY_CODE_BLOCKS = lambda container: container.locator("pre code, code-block code")
-FALLBACK_CODE_BLOCKS = lambda container: container.locator("code")
 
 LLM_SELECTED = "gemini"  # "chatgpt" or "gemini"
 
@@ -125,17 +103,125 @@ STOP_RESPONSE_BUTTON = SELECTORS["STOP_RESPONSE_BUTTON"]
 COMPOSER = SELECTORS["COMPOSER"]
 SEND_BUTTON = SELECTORS["SEND_BUTTON"]
 RESPONSE_TURNS = SELECTORS["RESPONSE_TURNS"]
+PRIMARY_CODE_BLOCKS = lambda container: container.locator("pre code, code-block code")
+FALLBACK_CODE_BLOCKS = lambda container: container.locator("code")
 llm_url = SELECTORS["LLM_URL"]
 
 
+MAX_PROMPTS_PER_CHAT = 10
+ASYNC_LOG_FILE = Constants.PROJECT_DIR.joinpath("lucy_latest_python/gemini_llm_activity.jsonl")
+
+class AsyncLLMLogger:
+    """Writes LLM activity to disk from a dedicated background thread."""
+
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self._queue = queue.Queue()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._worker,
+            name="Lucy-LLM-Logger",
+            daemon=True,
+        )
+
+    def start(self):
+        self._thread.start()
+
+    def log(self, event_type: str, **data):
+        """Queues a timestamped event without waiting for disk I/O."""
+        self._queue.put_nowait({
+            "datetime": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "event": event_type,
+            **data,
+        })
+
+    def _worker(self):
+        try:
+            while not self._stop_event.is_set() or not self._queue.empty():
+                try:
+                    record = self._queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                try:
+                    Path(self.file_path).parent.mkdir(parents=True, exist_ok=True)
+                    with open(
+                        self.file_path,
+                        "a",
+                        encoding="utf-8",
+                        buffering=1,
+                    ) as f:
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                except Exception as e:
+                    # Never allow logging failures to affect the LLM loop.
+                    print(f"[Async Logger Error] {e}")
+                finally:
+                    self._queue.task_done()
+        except Exception as e:
+            print(f"[Async Logger Fatal Error] {e}")
+
+    def stop(self):
+        """Flushes queued records before the process exits."""
+        self._stop_event.set()
+        self._thread.join(timeout=5)
 
 
-user_prompt_prefix = "Can you pass me python code that helps me with '"
+def build_rollover_request(original_request: str, latest_code: str, latest_output: str) -> str:
+    """Builds the context sent to the first prompt in a fresh Gemini chat."""
+    return (
+        f"{Constants.PROMPT_PREFIX}{original_request}{Constants.PROMPT_SUFFIX}\n\n"
+        "IMPORTANT: This is a continuation in a fresh chat because the previous "
+        "chat reached its prompt limit.\n\n"
+        "LATEST PYTHON CODE THAT WAS EXECUTED:\n"
+        "```python\n"
+        f"{latest_code}\n"
+        "```\n\n"
+        "OUTPUT FROM THAT CODE:\n"
+        f"{latest_output}\n\n"
+        "Continue working on the original task from this state. "
+        "Do not restart the work from scratch."
+    )
 
-user_prompt_suffix = "'? - When browsing use playwright 9223 instance already running and never modify the gemini/app or /usage tabs. Every script on my machine has a physical timeout of 2 mins max so be careful. I'll let you know if there's any errors so keep giving me code until I dealt with this. Be curious and continously try new things,  work on the problem, fix it, improve it, repeat until I say stop. You dont stop until I say so."
 
+def open_fresh_llm_chat(state, logger, original_request, latest_code, latest_output):
+    """
+    Opens a new Gemini tab using the exact configured Gemini URL, waits for it
+    to render, then sends the continuation context.
+    """
+    old_page = state["page"]
 
+    logger.log(
+        "chat_rollover",
+        reason=f"Reached {MAX_PROMPTS_PER_CHAT} prompts",
+        previous_url=old_page.url,
+    )
+    
+    # reload the same page instead of opening new pages to preserve system resources
+    new_page = old_page
+    new_page.goto(llm_url, wait_until="domcontentloaded")
+    new_page.wait_for_timeout(2000)
 
+    # Wait for the actual composer rather than relying only on a fixed delay.
+    COMPOSER(new_page).wait_for(state="visible", timeout=30000)
+
+    rollover_request = build_rollover_request(
+        original_request,
+        latest_code,
+        latest_output,
+    )
+
+    send_request(new_page, rollover_request)
+
+    logger.log(
+        "prompt_sent",
+        prompt_number=1,
+        rollover=True,
+        prompt=rollover_request,
+    )
+
+    # The rollover context message is itself the first sent prompt in the
+    # fresh chat, so the counter starts at 1.
+    return new_page, 1
 
 
 def run_python_code(script_content: str, max_runtime: float = 120.0) -> str:
@@ -281,7 +367,7 @@ def wait_for_ready(page):
 
 
 def send_request(page, request):
-
+    """Sends one prompt and returns only after submission is confirmed."""
     page.bring_to_front()
 
     wait_for_ready(page)
@@ -295,32 +381,29 @@ def send_request(page, request):
     composer.focus()
     composer.fill(request)
 
-
     composer.evaluate("""el => {
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
     }""")
 
     button = SEND_BUTTON(page)
-
-
     button.wait_for(state="visible", timeout=30000)
-    
-    # 3. Force click via DOM if standard click fails in background
+
     try:
         button.click(timeout=3000)
     except Exception:
         button.evaluate("btn => btn.click()")
 
-    # 4. Fallback verification
     try:
         expect(composer).to_be_empty(timeout=5000)
     except AssertionError:
         composer.press("Enter")
         expect(composer).to_be_empty(
-            timeout=5000, 
+            timeout=5000,
             message="Failed to submit request via UI."
         )
+
+    return True
 
 
 def extracted_code(page):
@@ -336,8 +419,8 @@ def extracted_code(page):
     if blocks.count() == 0:
         blocks = FALLBACK_CODE_BLOCKS(newest)
         if blocks.count() == 0:
-            if ("lucy_done_3030" in newest.inner_html().lower()):
-                return "lucy_done_3030"
+            if (Constants.MAGIC_STOP_WORD in newest.inner_html().lower()):
+                return Constants.MAGIC_STOP_WORD
     
     if blocks.count() > 1:
         raise RuntimeError(
@@ -403,12 +486,22 @@ def main():
         if not initial_request:
             return
 
-        request =  f"{user_prompt_prefix}{initial_request}{user_prompt_suffix}"
+        request = f"{Constants.PROMPT_PREFIX}{initial_request}{Constants.PROMPT_SUFFIX}"
+
+        # Counts every prompt actually sent to Gemini. Responses do not count.
+        prompts_sent_in_current_chat = 0
+
+        # Latest execution state is retained specifically for chat rollover.
+        latest_code = ""
+        latest_output = ""
+
+        async_logger = AsyncLLMLogger(ASYNC_LOG_FILE)
+        async_logger.start()
 
         while True:
             try:
                 if not is_cdp_port_active(Constants.PORT):
-                   state = reconnect(p)
+                    state = reconnect(p)
 
                 if not request.strip():
                     request = (
@@ -424,47 +517,152 @@ def main():
                     request
                 )
 
-                log(
-                    f"Request sent.",
-                    LogColors.GREEN
+                prompts_sent_in_current_chat += 1
+
+                # This log operation only puts a small object into a queue.
+                # Disk I/O happens on the dedicated logger thread.
+                async_logger.log(
+                    "prompt_sent",
+                    prompt_number=prompts_sent_in_current_chat,
+                    rollover=False,
+                    prompt=request,
                 )
 
+                log(
+                    f"Request sent ({prompts_sent_in_current_chat}/{MAX_PROMPTS_PER_CHAT}).",
+                    LogColors.GREEN
+                )
 
                 response = extracted_code(
                     state["page"]
                 )
 
-                if "lucy_done_3030" in response.lower().strip():
+                if Constants.MAGIC_STOP_WORD in response.lower().strip():
+                    async_logger.log(
+                        "completion",
+                        prompt_number=prompts_sent_in_current_chat,
+                        code=response,
+                        output="Job finished.",
+                    )
+
                     log(
                         f"Job Finished. Idling...",
                         LogColors.GRAY
                     )
-                    # TODO add multi-line input here as well
+
                     check_for_next_request_log = print(
                         "Enter next task: "
                     )
 
                     check_for_next_request = sys.stdin.read().strip()
-                    
 
                     if not check_for_next_request:
+                        async_logger.stop()
                         break
 
-                    request = f"{user_prompt_prefix}{check_for_next_request}{user_prompt_suffix}"
-
+                    # New user task = new conversation state and fresh count.
+                    initial_request = check_for_next_request
+                    request = (
+                        f"{Constants.PROMPT_PREFIX}"
+                        f"{check_for_next_request}"
+                        f"{Constants.PROMPT_SUFFIX}"
+                    )
+                    prompts_sent_in_current_chat = 0
+                    latest_code = ""
+                    latest_output = ""
                     continue
 
-            
-                request = run_python_code(response)
+                # Preserve the exact code and exact compact execution output
+                # for both logging and the next chat rollover.
+                latest_code = response
+                latest_output = run_python_code(response)
+
+                async_logger.log(
+                    "code_executed",
+                    prompt_number=prompts_sent_in_current_chat,
+                    code=latest_code,
+                    output=latest_output,
+                )
 
                 log(
-                    f"OUTPUT:\n{request}",
+                    f"OUTPUT:\n{latest_output}",
                     LogColors.CYAN
                 )
 
-                time.sleep(4) # increase delay to trottle usage for chatgpt
-                continue
+                # Once 20 prompts have been SENT, rollover before generating
+                # the next normal request. The rollover context prompt is
+                # sent into the fresh chat and counts as prompt #1 there.
+                if prompts_sent_in_current_chat >= MAX_PROMPTS_PER_CHAT:
+                    new_page, prompts_sent_in_current_chat = open_fresh_llm_chat(
+                        state,
+                        async_logger,
+                        initial_request,
+                        latest_code,
+                        latest_output,
+                    )
 
+                    state["page"] = new_page
+
+                    log(
+                        "Started fresh Gemini chat and transferred latest state.",
+                        LogColors.YELLOW
+                    )
+
+                    # The rollover prompt is now waiting for Gemini's response.
+                    # Continue directly to extraction/execution below.
+                    response = extracted_code(state["page"])
+
+                    if Constants.MAGIC_STOP_WORD in response.lower().strip():
+                        async_logger.log(
+                            "completion",
+                            prompt_number=prompts_sent_in_current_chat,
+                            code=response,
+                            output="Job finished.",
+                        )
+
+                        log(
+                            "Job Finished. Idling...",
+                            LogColors.GRAY
+                        )
+
+                        check_for_next_request = sys.stdin.read().strip()
+
+                        if not check_for_next_request:
+                            async_logger.stop()
+                            break
+
+                        initial_request = check_for_next_request
+                        request = (
+                            f"{Constants.PROMPT_PREFIX}"
+                            f"{check_for_next_request}"
+                            f"{Constants.PROMPT_SUFFIX}"
+                        )
+                        prompts_sent_in_current_chat = 0
+                        latest_code = ""
+                        latest_output = ""
+                        continue
+
+                    latest_code = response
+                    latest_output = run_python_code(response)
+
+                    async_logger.log(
+                        "code_executed",
+                        prompt_number=prompts_sent_in_current_chat,
+                        code=latest_code,
+                        output=latest_output,
+                    )
+
+                    log(
+                        f"ROLLOVER OUTPUT:\n{latest_output}",
+                        LogColors.CYAN
+                    )
+
+                # The next normal Gemini prompt is generated from the latest
+                # Python execution result.
+                request = latest_output
+
+                time.sleep(4)  # throttle usage
+                continue
 
             except PlaywrightError as e:
 
@@ -472,7 +670,11 @@ def main():
 
                     try:
                         state = reconnect(p)
-                        request = initial_request
+                        request = (
+                            f"{Constants.PROMPT_PREFIX}"
+                            f"{initial_request}"
+                            f"{Constants.PROMPT_SUFFIX}"
+                        )
 
                     except Exception as fatal:
 
@@ -488,6 +690,11 @@ def main():
 
 
             except KeyboardInterrupt:
+                try:
+                    async_logger.stop()
+                except Exception:
+                    pass
+
                 log(
                     f"Interrupted by user.",
                     LogColors.RED
@@ -505,9 +712,20 @@ def main():
                 except Exception:
                     pass
 
+                kill_cdp_browser()
+
                 sys.exit(0)
 
             except Exception as e:
+
+                try:
+                    async_logger.log(
+                        "error",
+                        error=str(e),
+                        prompt_number=prompts_sent_in_current_chat,
+                    )
+                except Exception:
+                    pass
 
                 log(
                     f"Loop error caught: {e}",
@@ -527,4 +745,3 @@ if __name__ == "__main__":
 # saving this shit for later
 # number of user sent prompts (how many messages we sent)
 # page.locator("user-query-content").count()
-
