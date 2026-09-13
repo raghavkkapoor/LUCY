@@ -1,8 +1,13 @@
 import re
 
 def get_gemini_usage(page) -> dict:
-    result = {'daily_usage_remaining': None, 'weekly_usage_remaining': None}
-    page.reload(wait_until='domcontentloaded', timeout=30000)
+    if not "gemini.google.com/usage" in page.url:
+        page.goto("https://gemini.google.com/usage")
+        page.wait_for_timeout(2000)
+    else:
+        page.reload(wait_until='domcontentloaded', timeout=20000)
+        
+    result = {'daily_usage_remaining': None, 'weekly_usage_remaining': None}    
     daily_usage_dom_text = page.locator('[data-test-id="gxu-currently"]').inner_text().lower()
     segment1 = daily_usage_dom_text.split('\n')[2]
     daily_usage = ''.join([char for char in segment1 if char.isdigit()])

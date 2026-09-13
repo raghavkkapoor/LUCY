@@ -1,3 +1,6 @@
+# known bug: Loop error caught: LocatorAssertions.to_be_empty() got an unexpected keyword argument 'message'
+
+
 # Standard imports
 import sys
 import time
@@ -10,6 +13,7 @@ import subprocess
 import re
 import ast
 import psutil
+import signal
 
 # Util imports
 from utils.CloseLucyBrowser9223 import kill_cdp_browser
@@ -22,26 +26,22 @@ import utils.Constants as Constants
 
 def check_usage_and_warn(usage_page):
     if not get_gemini_usage:
-        print("[Usage Monitor] gemini_usage module not available. Skipping check.")
+        log("[Usage Monitor] gemini_usage module not available. Skipping check.", LogColors.YELLOW)
         return
     try:
-        print("[Usage Monitor] Checking Gemini usage metrics...")
         usage_data = get_gemini_usage(usage_page)
         current_usage_str = int(usage_data.get("daily_usage_remaining"))
-        if current_usage_str:
+        if current_usage_str >= 0:
             if current_usage_str > 80:
-                print(f"\033[93m[WARNING] You are reaching the selected LLM's limits! Current usage is at {current_usage_str}%.\033[0m")
-                print("[Usage Monitor] Exiting script execution due to high usage limits.")
-                sys.exit(0)
-            else:
-                print(f"[Usage Monitor] Usage is safe ({current_usage_str}%). Proceeding...")
+                log("[Usage Monitor Error] Lucy has reached high usage limits. Current usage is at {current_usage_str}%.", LogColors.RED)
+                sys.exit(1)
         else:
-            print("[Usage Monitor] Could not parse numeric usage percentage. Proceeding...")
+            log("[Usage Monitor] Could not parse numeric usage percentage.", LogColors.YELLOW)
     except Exception as e:
-        print(f"[Usage Monitor Error] Failed to retrieve usage metrics: {e}")
+        log(f"[Usage Monitor Error] Failed to retrieve usage metrics: {e}", LogColors.YELLOW)
 
 
-LLM_SELECTED = "gemini"  # "chatgpt" or "gemini"
+LLM_SELECTED = "gemini"
 
 def get_llm_selectors(llm):
     llm = llm.lower().strip()
@@ -277,7 +277,7 @@ def run_python_code(script_content: str, max_runtime: float = 120.0) -> str:
 
 
 def connect_to_LLM(p, endpoint_url):
-    log(f"Connecting to ChatGPT at {endpoint_url}...", LogColors.YELLOW)
+    log(f"Connecting to Gemini at {endpoint_url}...", LogColors.YELLOW)
 
     try:
         browser = p.chromium.connect_over_cdp(
@@ -460,6 +460,12 @@ def main():
             endpoint_url
         )
 
+        # saved_context = state["context"].storage_state()
+
+        # state["browser"].new_context(storage_state = saved_context).new_page()
+
+
+
         # Open or reuse dedicated usage monitoring tab (prevent duplicates)
         usage_page = None
         for p_tab in state["context"].pages:
@@ -484,7 +490,7 @@ def main():
         initial_request = sys.stdin.read().strip()
 
         if not initial_request:
-            return
+            raise ValueError("No input provided on stdin.")
 
         request = f"{Constants.PROMPT_PREFIX}{initial_request}{Constants.PROMPT_SUFFIX}"
 
@@ -687,37 +693,7 @@ def main():
                     request = (
                         f"Playwright Engine Error: {e}"
                     )
-
-
-            except KeyboardInterrupt:
-                try:
-                    async_logger.stop()
-                except Exception:
-                    pass
-
-                log(
-                    f"Interrupted by user.",
-                    LogColors.RED
-                )
-
-                try:
-                    if 'state' in locals() and 'page' in state and is_generating(state["page"]):
-                        log("Stopping active Gemini generation...", LogColors.YELLOW)
-                        STOP_RESPONSE_BUTTON(state["page"]).click(timeout=3000)
-                except Exception as ex:
-                    log(f"Could not stop generation on exit: {ex}", LogColors.YELLOW)
-
-                try:
-                    p.stop()
-                except Exception:
-                    pass
-
-                kill_cdp_browser()
-
-                sys.exit(0)
-
             except Exception as e:
-
                 try:
                     async_logger.log(
                         "error",
@@ -734,8 +710,40 @@ def main():
 
                 request = (str(e))
 
-                time.sleep(2)
-                continue
+                # throttle rate of responses?
+                time.sleep(1)
+
+            except KeyboardInterrupt:
+                log("Interrupted by user.", LogColors.RED)
+            finally:
+                # ignore ctrl+c
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+                # quit convo logger
+                try:
+                    async_logger.stop()
+                except Exception:
+                    pass
+
+                # stop current llm response from further generation
+                try:
+                    if 'state' in locals() and 'page' in state and is_generating(state["page"]):
+                        log("Stopping active Gemini generation...", LogColors.YELLOW)
+                        STOP_RESPONSE_BUTTON(state["page"]).click(timeout=3000)
+                except Exception as ex:
+                    log(f"Could not stop generation on exit: {ex}", LogColors.YELLOW)
+
+                # quit playwright
+                try:
+                    p.stop()
+                except Exception:
+                    pass
+
+                # kill browser instance(s)
+                kill_cdp_browser()
+
+                # exit
+                sys.exit(0)
 
 
 if __name__ == "__main__":

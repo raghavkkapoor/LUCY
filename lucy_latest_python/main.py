@@ -1,36 +1,85 @@
-
-from utils.lucy_logging import log, LogColors
-from utils.lucy_command_search import process_input
-from utils.find_anything import process_multi_search
-from utils.CloseLucyBrowser9223 import kill_cdp_browser
-from utils.ChromeCdpManager import launch_lucy_chrome
-import ctypes
-import customtkinter as ctk
 import sys
-import keyboard
+import os
+
+if getattr(sys, 'frozen', False):
+    # Executing inside PyInstaller bundle
+    BASE_DIR = sys._MEIPASS
+else:
+    # Executing as standard script
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+import ctypes
 import signal
+import customtkinter as ctk
+import keyboard
+from PIL import Image
+from utils.lucy_logging import LogColors, log
+import threading
+import pystray
+from pystray import MenuItem as item
+import traceback
+
+def show_fatal_error(exc_type, exc_value, exc_tb):
+    """Catches unhandled exceptions and displays a native Windows error dialog."""
+    tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+    err_text = "".join(tb_lines)
+
+    try:
+        log(f"[FATAL ERROR]\n{err_text}", LogColors.RED)
+    except Exception:
+        pass
+
+    ctypes.windll.user32.MessageBoxW(
+        0, 
+        err_text, 
+        "LUCY - Unhandled Fatal Exception", 
+        0x10
+    )
+    sys.exit(1)
+
+sys.excepthook = show_fatal_error
+
+icon_path = os.path.join(BASE_DIR, "Lucy-fonts", "microphone-solid-gray.png")
+font_path = os.path.join(BASE_DIR, "Lucy-fonts", "GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf")
+
+# Safe image fallback handling for test environments
+try:
+    pil_img = Image.open(icon_path)
+    mic_icon = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(20, 20))
+except Exception:
+    pil_img = Image.new('RGBA', (20, 20), (128, 128, 128, 255))
+    mic_icon = None
 
 
-APP_BG_COLOR = "#04082D"
-
-def load_local_font(font_path):
+def load_local_font():
     """Dynamically loads a .ttf font into the Windows session memory."""
     FR_PRIVATE = 0x10
     ctypes.windll.gdi32.AddFontResourceExW(font_path, FR_PRIVATE, 0)
 
+
 try:
-    load_local_font(
-        r"Lucy-fonts\GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf"
-    )
+    load_local_font()
 except Exception as e:
     log(f"[WARNING] Could not load font: {e}", LogColors.YELLOW)
 
-# ctk.set_appearance_mode("Dark")
+ctk.set_appearance_mode("Dark")
 
+# ---------------------------------------------------------
+# MAIN APPLICATION WINDOW
+# ---------------------------------------------------------
 app = ctk.CTk()
 app.title("LUCY")
 app.overrideredirect(True)
-app.configure(fg_color=APP_BG_COLOR)
+
+# Chroma key transparent color for rounded edges
+TRANSPARENT_COLOR = "#000001"
+DARK_BG_COLOR = "#1e1e1e"
+DEFAULT_BORDER_COLOR = "#7E88B1"
+
+app.configure(fg_color=TRANSPARENT_COLOR)
+app.wm_attributes("-transparentcolor", TRANSPARENT_COLOR)
+app.attributes("-topmost", True)
 
 screen_w = app.winfo_screenwidth()
 screen_h = app.winfo_screenheight()
@@ -42,32 +91,77 @@ min_w = int(screen_w * min_w_pct)
 min_h = int(screen_h * min_h_pct)
 
 app_window_width = min(max(screen_w, min_w), max_w_px)
-base_window_height = 220
-app_window_height = min(max(screen_h, min_h), base_window_height)
+base_window_height = 50
+current_app_h = base_window_height
 
-pos_x = int(screen_w / 2 - (app_window_width / 2))
-pos_y = 150
+pos_x = int(screen_w - app_window_width - 20)
+pos_y = 40
 
-app.geometry(f"{app_window_width}x{app_window_height}+{pos_x}+{pos_y}")
+app.geometry(f"{app_window_width}x{base_window_height}+{pos_x}+{pos_y}")
+
+# Global registry to manage open notification windows
+active_notifications = []
+
+def reposition_all_notifications():
+    """Adjusts position of all open notification windows beneath main window."""
+    gap = 8
+    accumulated_y = pos_y + current_app_h + gap
+
+    for notif_win in list(active_notifications):
+        if notif_win.winfo_exists():
+            h = notif_win._win_height
+            notif_win.geometry(f"{app_window_width}x{h}+{pos_x}+{accumulated_y}")
+            accumulated_y += h + gap
+        else:
+            active_notifications.remove(notif_win)
+
+
+# ---------------------------------------------------------
+# SYSTEM TRAY SETUP
+# ---------------------------------------------------------
+tray_icon = None
+def on_tray_toggle(icon, item):
+    """Safely toggles window visibility from system tray menu."""
+    app.after(0, lambda: toggle_window(app_handle=app, input_entry=textbox))
+
+def on_tray_exit(icon, item):
+    """Clean exit triggered from system tray context menu."""
+    icon.stop()
+    app.after(0, handle_cleanup)
+
+def setup_system_tray():
+    global tray_icon
+    
+    menu = pystray.Menu(
+        item("Show/Hide LUCY", on_tray_toggle, default=True),
+        pystray.Menu.SEPARATOR,
+        item("Exit", on_tray_exit)
+    )
+    
+    tray_icon = pystray.Icon("LUCY", pil_img, "LUCY Assistant", menu)
+    tray_icon.run()
+
+tray_thread = threading.Thread(target=setup_system_tray, daemon=True)
+tray_thread.start()
 
 def handle_cleanup():
-    log("Cleaning up...", LogColors.GREEN)
+    global tray_icon
     try:
-        kill_cdp_browser()
-        log("Closed CDP browser instance...", LogColors.GREEN) 
-    except Exception as e:
-        log(f"Cleanup browser error: {e}", LogColors.RED)
-
-    app.destroy()
-
+        log("Cleaning up...", LogColors.GREEN)
+        if tray_icon is not None:
+            tray_icon.stop()
+        app.destroy()
+    except Exception:
+        pass
     sys.exit(0)
 
-# 1. Define what happens when Ctrl+C is pressed in the terminal
+
 signal.signal(signal.SIGINT, lambda sig, frame: handle_cleanup())
 
-# 2. Keep-alive timer to allow Python to intercept terminal signals
+
 def allow_signals():
     app.after(500, allow_signals)
+
 
 app.after(500, allow_signals)
 
@@ -75,176 +169,323 @@ app.after(500, allow_signals)
 # VISIBILITY & HOTKEY LOGIC
 # ---------------------------------------------------------
 is_visible = True
+is_initializing = False
 
 def toggle_window(app_handle, input_entry):
     global is_visible
+    if is_initializing:
+        return
+
     if is_visible:
         app_handle.withdraw()
+        for win in active_notifications:
+            if win.winfo_exists():
+                win.withdraw()
         is_visible = False
     else:
         app_handle.deiconify()
         app_handle.lift()
         app_handle.focus_force()
+        for win in active_notifications:
+            if win.winfo_exists():
+                win.deiconify()
+                win.lift()
         input_entry.focus()
         is_visible = True
+
 
 # ---------------------------------------------------------
 # DYNAMIC RESIZING & LOGGING
 # ---------------------------------------------------------
 BASE_INPUT_HEIGHT = 45
-# THIS COMMANDS DIRECTORY WILL BE A SERVER INSTEAD OF LOCALLY STORED SCRIPTS
-COMMANDS_ROOT_DIR = r"C:\Users\ragha\OneDrive\Desktop\LUCY\lucy_latest_python\POWERSHELL_DEBUG_SCRIPTS"
-MAX_SEARCH_RESULTS = 200
+PLACEHOLDER = "Ask Lucy..."
+COLOR_PLACEHOLDER = ("#808080", "#a0a0a0")
+COLOR_TEXT = ("#1a1a1a", "#ffffff")
 
 def on_input_change(event=None):
-    content = repr(textbox.get("1.0", "end-1c"))
+    global current_app_h
+    raw_text = textbox.get("1.0", "end-1c")
 
-    if (len(content.strip("'").strip(r"\n")) == 0):
+    if not raw_text.strip() or raw_text == PLACEHOLDER or is_initializing:
+        current_app_h = base_window_height
+    else:
+        lines = raw_text.split("\n")
+        chars_per_line = 34
+        total_effective_lines = 0
+
+        for line in lines:
+            total_effective_lines += max(
+                1, (len(line) + chars_per_line - 1) // chars_per_line
+            )
+
+        calculated_height = base_window_height + (total_effective_lines - 1) * 22
+        current_app_h = min(max(calculated_height, base_window_height), max_h_px)
+
+    app.geometry(f"{app_window_width}x{current_app_h}+{pos_x}+{pos_y}")
+    reposition_all_notifications()
+
+
+# ---------------------------------------------------------
+# FOCUS LOGIC
+# ---------------------------------------------------------
+def on_focus_in(event):
+    if is_initializing:
         return
+    if textbox.get("1.0", "end-1c") == PLACEHOLDER:
+        textbox.delete("1.0", "end")
+        textbox.configure(text_color=COLOR_TEXT)
 
 
-    # process_input(content, COMMANDS_ROOT_DIR, limit=MAX_SEARCH_RESULTS)
-    process_multi_search(content, limit=MAX_SEARCH_RESULTS)
+def on_focus_out(event):
+    if is_initializing:
+        return
+    if not textbox.get("1.0", "end-1c").strip():
+        textbox.insert("1.0", PLACEHOLDER)
+        textbox.configure(text_color=COLOR_PLACEHOLDER)
+        on_input_change()
 
-
-    num_lines = content.count("\n") + 1
-    chars_per_line = 38
-    wrapped_lines = sum(
-        max(1, len(line) // chars_per_line) for line in content.split("\n")
-    )
-    effective_lines = max(num_lines, wrapped_lines)
-
-    new_input_h = BASE_INPUT_HEIGHT + (effective_lines - 1) * 22
-    target_window_h = base_window_height + (new_input_h - BASE_INPUT_HEIGHT)
-    final_window_h = min(max(target_window_h, base_window_height), max_h_px)
-
-    textbox.configure(
-        height=final_window_h - (base_window_height - BASE_INPUT_HEIGHT)
-    )
-    app.geometry(f"{app_window_width}x{final_window_h}")
-
-# ---------------------------------------------------------
-# CONDITIONAL DRAGGABLE WINDOW LOGIC
-# ---------------------------------------------------------
-_drag_start_x = 0
-_drag_start_y = 0
-is_textbox_focused = False
-
-def set_textbox_focused(focused):
-    global is_textbox_focused
-    is_textbox_focused = focused
 
 def is_event_inside_textbox(event_widget):
-    """Checks if the mouse event originated from the textbox or any of its sub-widgets."""
     widget = event_widget
     while widget is not None:
-        if widget == textbox:
+        if widget in (textbox, input_container):
             return True
         widget = getattr(widget, "master", None)
     return False
 
-def start_drag(event):
-    global _drag_start_x, _drag_start_y
-    # Do not initiate drag if focused or clicking inside textbox/scrollbar
-    if is_textbox_focused or is_event_inside_textbox(event.widget):
-        return
-    _drag_start_x = event.x
-    _drag_start_y = event.y
-
-def execute_drag(event):
-    # Ignore motion events if focused or clicking inside textbox/scrollbar
-    if is_textbox_focused or is_event_inside_textbox(event.widget):
-        return
-    x = app.winfo_x() - _drag_start_x + event.x
-    y = app.winfo_y() - _drag_start_y + event.y
-    app.geometry(f"+{x}+{y}")
-
-app.bind("<Button-1>", start_drag)
-app.bind("<B1-Motion>", execute_drag)
 
 # ---------------------------------------------------------
-# UI LAYOUT
+# UI LAYOUT - MAIN WINDOW
 # ---------------------------------------------------------
-container = ctk.CTkFrame(app, fg_color="transparent")
-container.pack(expand=True, fill="both", padx=20, pady=15)
-
-container.bind("<Button-1>", start_drag)
-container.bind("<B1-Motion>", execute_drag)
-
-label_title = ctk.CTkLabel(
-    container,
-    text="LUCY [beta]",
-    font=("Google Sans Flex", 24, "bold"),
-    text_color="#CDD6F4",
+main_container = ctk.CTkFrame(
+    master=app,
+    fg_color=TRANSPARENT_COLOR,
+    border_width=0,
 )
-label_title.pack(pady=(0, 2))
+main_container.pack(fill="both", expand=True)
 
-label_subtitle = ctk.CTkLabel(
-    container,
-    text="What would you like to do?",
-    font=("Google Sans Flex", 18),
-    text_color="#89B4FA",
+input_container = ctk.CTkFrame(
+    main_container,
+    corner_radius=16,
+    fg_color=DARK_BG_COLOR,
+    border_width=2,
+    border_color=DEFAULT_BORDER_COLOR
 )
-label_subtitle.pack(pady=(0, 10))
+input_container.pack(fill="both", expand=True, padx=0, pady=0)
+
+input_container.grid_columnconfigure(0, weight=1)
+input_container.grid_columnconfigure(1, weight=0)
+input_container.grid_rowconfigure(0, weight=1)
 
 textbox = ctk.CTkTextbox(
-    container,
-    height=BASE_INPUT_HEIGHT,
-    font=("Google Sans Flex", 15),
+    input_container,
+    font=("Google Sans Flex", 16),
     wrap="word",
-    fg_color="#313244",
-    border_color="#45475A",
-    border_width=1,
-    text_color="#CDD6F4",
+    fg_color="transparent",
+    border_width=0,
     activate_scrollbars=True,
+    scrollbar_button_color="#d1d1d1",
+    scrollbar_button_hover_color="#b5b5b5",
 )
-textbox.pack(fill="x", padx=5)
-textbox.focus()
+textbox.grid(row=0, column=0, sticky="nsew", padx=(10, 2), pady=4)
 
-# Track focus states to explicitly block window dragging
-textbox.bind("<FocusIn>", lambda e: set_textbox_focused(True))
-textbox.bind("<FocusOut>", lambda e: set_textbox_focused(False))
+textbox.insert("1.0", PLACEHOLDER)
+textbox.configure(text_color=COLOR_PLACEHOLDER)
 
-# Clicking background outside the textbox clears focus from the textbox
+textbox.bind("<FocusIn>", on_focus_in)
+textbox.bind("<FocusOut>", on_focus_out)
+textbox.bind(
+    "<<Modified>>",
+    lambda e: (
+        textbox.edit_modified(False),
+        app.after_idle(on_input_change),
+    )[-1],
+)
+
+
+def trigger_mic_action():
+    if is_initializing:
+        return
+    log("Microphone clicked...", LogColors.GREEN)
+
+
+btn_mic = ctk.CTkButton(
+    input_container,
+    text="",
+    image=mic_icon,
+    width=0,
+    height=0,
+    hover=False,
+    fg_color="transparent",
+    command=trigger_mic_action,
+    border_spacing=8,
+)
+btn_mic.grid(row=0, column=1, sticky="ne", padx=(2, 6), pady=6)
+
+
+# ---------------------------------------------------------
+# INITIALIZATION LOCK & RIPPLE ANIMATION
+# ---------------------------------------------------------
+def initialize_lucy(seconds=4):
+    """Blocks UI input for `seconds`, playing a border ripple & loading dots animation."""
+    global is_initializing
+    is_initializing = True
+
+    # Lock interaction controls
+    btn_mic.configure(state="disabled")
+    textbox.configure(state="normal")
+    textbox.delete("1.0", "end")
+    textbox.insert("1.0", "Initializing Lucy...")
+    textbox.configure(text_color=COLOR_PLACEHOLDER, state="disabled")
+
+    ripple_colors = ["#7E88B1", "#8EA0E3", "#9BB5FF", "#8EA0E3"]
+    total_steps = int(seconds * 10)  # 10 frames per second
+    step = 0
+
+    def animate():
+        nonlocal step
+        if step < total_steps:
+            # Animate text dots
+            dot_count = (step % 4)
+            dots = ">" * dot_count
+            textbox.configure(state="normal")
+            textbox.delete("1.0", "end")
+            textbox.insert("1.0", f"Initializing Lucy{dots}")
+            textbox.configure(state="disabled")
+
+            # Animate border ripple
+            color = ripple_colors[step % len(ripple_colors)]
+            input_container.configure(border_color=color)
+            input_container.configure(border_color=color)
+            textbox.configure(text_color=color)
+            
+
+            step += 1
+            app.after(150, animate)
+        else:
+            # Restore state after initialization finishes
+            finish_initialization()
+
+    def finish_initialization():
+        global is_initializing
+        is_initializing = False
+
+        # Reset container border & restore textbox
+        input_container.configure(border_color=DEFAULT_BORDER_COLOR)
+        textbox.configure(state="normal")
+        textbox.delete("1.0", "end")
+        textbox.insert("1.0", PLACEHOLDER)
+        textbox.configure(text_color=COLOR_PLACEHOLDER)
+
+        # Re-enable mic button
+        btn_mic.configure(state="normal")
+
+    animate()
+
+
+# ---------------------------------------------------------
+# DYNAMIC NOTIFICATION WINDOW CREATOR
+# ---------------------------------------------------------
+def show_notification_window(title: str, text: str, notif_h: int = 150):
+    """Creates a standalone top-level notification popup positioned under the main window."""
+    notif_win = ctk.CTkToplevel(app)
+    notif_win.title("LUCY Notification")
+    notif_win.overrideredirect(True)
+    notif_win.configure(fg_color=TRANSPARENT_COLOR)
+    notif_win.wm_attributes("-transparentcolor", TRANSPARENT_COLOR)
+    notif_win.attributes("-topmost", True)
+    notif_win._win_height = notif_h
+
+    # Container setup
+    notif_main = ctk.CTkFrame(master=notif_win, fg_color=TRANSPARENT_COLOR, border_width=0)
+    notif_main.pack(fill="both", expand=True)
+
+    notif_box = ctk.CTkFrame(
+        notif_main,
+        corner_radius=16,
+        fg_color=DARK_BG_COLOR,
+        border_width=1,
+        border_color="#7E88B1"
+    )
+    notif_box.pack(fill="both", expand=True, padx=0, pady=0)
+
+    # Title Bar Header with Close Button
+    header_frame = ctk.CTkFrame(notif_box, fg_color="transparent")
+    header_frame.pack(fill="x", padx=12, pady=(8, 2))
+
+    title_label = ctk.CTkLabel(
+        header_frame,
+        text=title,
+        font=("Google Sans Flex", 14, "bold"),
+        text_color="#808080",
+        anchor="w"
+    )
+    title_label.pack(side="left", fill="x", expand=True)
+
+    def close_popup():
+        if notif_win in active_notifications:
+            active_notifications.remove(notif_win)
+        notif_win.destroy()
+        reposition_all_notifications()
+
+    btn_close = ctk.CTkButton(
+        header_frame,
+        text="✕",
+        width=18,
+        height=18,
+        corner_radius=9,
+        fg_color="transparent",
+        hover_color="#333333",
+        text_color="#808080",
+        font=("Arial", 11, "bold"),
+        command=close_popup
+    )
+    btn_close.pack(side="right")
+
+    # Divider
+    divider = ctk.CTkFrame(notif_box, height=1, fg_color="#7E88B1", border_width=0)
+    divider.pack(fill="x", padx=10, pady=(0, 4))
+
+    # Text content
+    notif_textbox = ctk.CTkTextbox(
+        notif_box,
+        font=("Google Sans Flex", 13),
+        wrap="word",
+        fg_color="transparent",
+        border_width=0,
+        text_color="#d1d1d1",
+        activate_scrollbars=True,
+        scrollbar_button_color="#d1d1d1",
+        scrollbar_button_hover_color="#b5b5b5",
+    )
+    notif_textbox.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+    notif_textbox.insert("1.0", text)
+
+    # Register and position
+    active_notifications.append(notif_win)
+    reposition_all_notifications()
+
+    if not is_visible:
+        notif_win.withdraw()
+
+    return notif_win
+
+
 def clear_focus_on_bg(event):
-    if not is_event_inside_textbox(event.widget):
+    if not is_event_inside_textbox(event.widget) and not is_initializing:
         app.focus_set()
 
+
 app.bind("<Button-1>", clear_focus_on_bg, add="+")
-container.bind("<Button-1>", clear_focus_on_bg, add="+")
-
-textbox.bind("<KeyRelease>", on_input_change)
-
-app.bind("<Escape>", lambda event: toggle_window(app_handle=app, input_entry=textbox))
-
-keyboard.add_hotkey(
-    "win+space", lambda: app.after(0, toggle_window, app, textbox)
+main_container.bind("<Button-1>", clear_focus_on_bg, add="+")
+app.bind(
+    "<Escape>",
+    lambda event: toggle_window(app_handle=app, input_entry=input_container),
 )
 
+keyboard.add_hotkey("ctrl+space", lambda: toggle_window(app_handle=app, input_entry=textbox))
 
-chrome = launch_lucy_chrome()
-endpoint_url = chrome["url"]
+# Schedule initialization overlay to execute right after main window renders (default 4 seconds)
+app.after(100, lambda: initialize_lucy(seconds=2))
 
-# MAIN GUI CALL
 app.mainloop()
-
-
-
-
-
-# Type of requests:
-
-# FIRST: NAVIGATE MYBCIT AND LEARNING HUB.
-
-# 1. Send and receive email.
-# 2. Summerized web search about a topic.
-# 3. Detailed web search about a topic.
-# 5. Create alarms and reminders.
-# 6. Playing any song/playlist (handling basic playback).
-# 7. Get every calendar event and ready to retrieve on demand. Automatically remind the user if an event is coming up without asking to "remind" them.
-# 8. Pull up any image(s) about something from the web.
-# 9. Open any website.
-# 10. Open any app.
-# 11. Know my youtube search history to pull relative past info on demand
-
-# TODO: PERFORM INTENT CLASSIFICATION ON THE UTILS DIRECTORY USING: Zero-Shot Text Classification

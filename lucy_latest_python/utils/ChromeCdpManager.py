@@ -8,17 +8,14 @@ import time
 import urllib.request
 # dont remove the . for relative import here keep it this way 
 from .lucy_logging import log, LogColors
-from .preview_window_helper import move_window_offscreen, render_window_preview
+from .preview_window_helper import show_browser_preview
 
 
-def apply_stealth_mode():
-    # Turn into preview window and hide it
-    name = move_window_offscreen()
-
+def apply_threaded_preview(pid):
     # Launch Tkinter preview window in a non-blocking background thread
     preview_thread = threading.Thread(
-        target=render_window_preview,
-        args=(name,),
+        target=show_browser_preview,
+        args=(pid,),
         daemon=True
     )
     preview_thread.start()
@@ -99,12 +96,12 @@ def launch_lucy_chrome(preferred_port=9223):
     # 1. Check if an instance is already running
     existing_instance = get_running_lucy_chrome()
     if existing_instance:
-        log(f"Lucy's browser is already running.\nPort:    {existing_instance['Port']}\nProfile: {existing_instance['ProfileDir']}\n", LogColors.YELLOW)
+        log(f"Found existing instance of Lucy's browser.\n", LogColors.GREEN)
         
         with open(state_file, "w", encoding="utf-8") as f:
             json.dump(existing_instance, f, indent=2)
 
-        apply_stealth_mode()
+        apply_threaded_preview(existing_instance["ProcessId"])
             
         return existing_instance
 
@@ -137,6 +134,8 @@ def launch_lucy_chrome(preferred_port=9223):
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile_dir}",
         "--profile-directory=Default",
+        "--disable-session-crashed-bubble",
+        "--hide-crash-restore-bubble"
         # f"--app=https://example.com/" # holy fuck, i pray for llms cuz lucy's architecture will work only if the LLM has at least 2 fucking braincells. Its all on the llm. If this mf can't think properly, we are all DOOMED. Genuinely. I mean it. 
     ]
     
@@ -167,8 +166,7 @@ def launch_lucy_chrome(preferred_port=9223):
     with open(state_file, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
-
-    apply_stealth_mode()
+    apply_threaded_preview(state["ProcessId"])
 
     log("\nLUCY:\nLucy Chrome ready.\n", LogColors.GREEN)
 

@@ -6,7 +6,7 @@ Ever-growing library of short, purposeful shell commands that include using LLMs
 
 
 
-**PROS:** 
+**PROS:**
 
 * Much faster - executes directly on the user's computer which rich access and control over the OS thanks to the OS shell.
 * Flexible system capable of handling both simple and complex tasks
@@ -29,6 +29,7 @@ Ever-growing library of short, purposeful shell commands that include using LLMs
 **ADDTIONAL NOTES:**
 
 * Needs a decent feedback system that returns which function failed, what kind of error, at which line, etc. along with the system's current state and state at the time of the error's occurrence.
+* text is better than voice interaction. There should be two modes Text and Voice mode with text being priority as per user feedback and research.
 
 
 
@@ -38,10 +39,11 @@ Toolkit:
 
 Emailing: Use gmail's old interface on SMTP AND IMAP to send and read emails quickly.
 
-Media playback: mainly youtube play any video (includes music cuz its on youtube), read comments, play the user's youtube playlists
+Media playback: mainly you tube play any video (includes music cuz its on youtube), read comments, play the user's youtube playlists
 
 Raylab to render 2D and 3D graphics for basic visualization.
 
 Windows built in TTS to speak out all responses predefined ones + llm parsed responses.
 
 Incomplete document...work in progress.
+
