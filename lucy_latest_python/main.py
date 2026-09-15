@@ -1,491 +1,472 @@
 import sys
-import os
-
-if getattr(sys, 'frozen', False):
-    # Executing inside PyInstaller bundle
-    BASE_DIR = sys._MEIPASS
-else:
-    # Executing as standard script
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-import ctypes
-import signal
-import customtkinter as ctk
-import keyboard
-from PIL import Image
-from utils.lucy_logging import LogColors, log
+import time
+import json
+import queue
 import threading
-import pystray
-from pystray import MenuItem as item
+from datetime import datetime
+from pathlib import Path
+import subprocess
+import re
+import ast
+import psutil
+import signal
 import traceback
 
-def show_fatal_error(exc_type, exc_value, exc_tb):
-    """Catches unhandled exceptions and displays a native Windows error dialog."""
-    tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
-    err_text = "".join(tb_lines)
+from utils.gui import LucyGUI
+
+# Playwright & LLM Automation Imports
+from playwright.sync_api import expect, sync_playwright, Error as PlaywrightError
+from utils.CloseLucyBrowser9223 import kill_cdp_browser
+from utils.gemini_usage import get_gemini_usage
+from utils.ChromeCdpManager import launch_lucy_chrome, is_cdp_port_active
+from utils.lucy_logging import log, LogColors
+import utils.Constants as Constants
+
+# ---------------------------------------------------------
+# LLM AUTOMATION UTILITIES & SELECTORS
+# ---------------------------------------------------------
+LLM_SELECTED = "gemini"
+
+def check_usage_and_warn(usage_page):
+    if not get_gemini_usage:
+        log("[Usage Monitor] gemini_usage module not available. Skipping check.", LogColors.YELLOW)
+        return
+    try:
+        usage_data = get_gemini_usage(usage_page)
+        current_usage_str = int(usage_data.get("daily_usage_remaining"))
+        if current_usage_str >= 0:
+            if current_usage_str > 80:
+                log(f"[Usage Monitor Error] Lucy has reached high usage limits. Current usage is at {current_usage_str}%.", LogColors.RED)
+                sys.exit(1)
+        else:
+            log("[Usage Monitor] Could not parse numeric usage percentage.", LogColors.YELLOW)
+    except Exception as e:
+        log(f"[Usage Monitor Error] Failed to retrieve usage metrics: {e}", LogColors.YELLOW)
+
+def get_llm_selectors(llm):
+    llm = llm.lower().strip()
+    if llm == "chatgpt":
+        return {
+            "STOP_RESPONSE_BUTTON": lambda page: page.get_by_test_id("stop-button").first,
+            "COMPOSER": lambda page: page.get_by_role("textbox", name="Chat with ChatGPT"),
+            "SEND_BUTTON": lambda page: page.locator('button.send-button, button[aria-label*="Send"], button[aria-label*="Submit"]').first,
+            "RESPONSE_TURNS": lambda page: page.locator('[data-message-author-role="assistant"]'),
+            "LLM_URL": Constants.CHATGPT_URL,
+        }
+    elif llm == "gemini":
+        return {
+            "STOP_RESPONSE_BUTTON": lambda page: page.get_by_role("button", name="Stop response").first,
+            "COMPOSER": lambda page: page.locator("rich-textarea .ql-editor").first,
+            "SEND_BUTTON": lambda page: page.locator('button.send-button, button[aria-label*="Send"], button[aria-label*="Submit"]').first,
+            "RESPONSE_TURNS": lambda page: page.locator('message-content, model-response, div.model-response, .response-container'),
+            "LLM_URL": Constants.GEMINI_GEM_URL,
+        }
+    raise ValueError(f"Unsupported LLM: {llm}.")
+
+SELECTORS = get_llm_selectors(LLM_SELECTED)
+STOP_RESPONSE_BUTTON = SELECTORS["STOP_RESPONSE_BUTTON"]
+COMPOSER = SELECTORS["COMPOSER"]
+SEND_BUTTON = SELECTORS["SEND_BUTTON"]
+RESPONSE_TURNS = SELECTORS["RESPONSE_TURNS"]
+PRIMARY_CODE_BLOCKS = lambda container: container.locator("pre code, code-block code")
+FALLBACK_CODE_BLOCKS = lambda container: container.locator("code")
+llm_url = SELECTORS["LLM_URL"]
+
+MAX_PROMPTS_PER_CHAT = 10
+# TODO: Write a new file for each days worth of interactions instead of stuffing it all in one file.
+ASYNC_LOG_FILE = Constants.PROJECT_DIR.joinpath("interactions.jsonl")
+
+class AsyncLLMLogger:
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self._queue = queue.Queue()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._worker, name="Lucy-LLM-Logger", daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def log(self, event_type: str, **data):
+        self._queue.put_nowait({
+            "datetime": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "event": event_type,
+            **data,
+        })
+
+    def _worker(self):
+        try:
+            while not self._stop_event.is_set() or not self._queue.empty():
+                try:
+                    record = self._queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                try:
+                    Path(self.file_path).parent.mkdir(parents=True, exist_ok=True)
+                    with open(self.file_path, "a", encoding="utf-8", buffering=1) as f:
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                except Exception as e:
+                    print(f"[Async Logger Error] {e}")
+                finally:
+                    self._queue.task_done()
+        except Exception as e:
+            print(f"[Async Logger Fatal Error] {e}")
+
+    def stop(self):
+        self._stop_event.set()
+        self._thread.join(timeout=5)
+
+def build_rollover_request(original_request: str, latest_code: str, latest_output: str) -> str:
+    return (
+        f"{Constants.PROMPT_PREFIX}{original_request}{Constants.PROMPT_SUFFIX}\n\n"
+        "IMPORTANT: This is a continuation in a fresh chat because the previous chat reached its prompt limit.\n\n"
+        "LATEST PYTHON CODE THAT WAS EXECUTED:\n"
+        "```python\n"
+        f"{latest_code}\n"
+        "```\n\n"
+        "OUTPUT FROM THAT CODE:\n"
+        f"{latest_output}\n\n"
+        "Continue working on the original task from this state. Do not restart the work from scratch."
+    )
+
+def open_fresh_llm_chat(state, logger, original_request, latest_code, latest_output):
+    old_page = state["page"]
+    logger.log("chat_rollover", reason=f"Reached {MAX_PROMPTS_PER_CHAT} prompts", previous_url=old_page.url)
+    new_page = old_page
+    new_page.goto(llm_url, wait_until="domcontentloaded")
+    new_page.wait_for_timeout(2000)
+    COMPOSER(new_page).wait_for(state="visible", timeout=30000)
+
+    rollover_request = build_rollover_request(original_request, latest_code, latest_output)
+    send_request(new_page, rollover_request)
+    logger.log("prompt_sent", prompt_number=1, rollover=True, prompt=rollover_request)
+    return new_page, 1
+def run_python_code(script_content: str, max_runtime: float = 120.0) -> str:
+    try:
+        tree = ast.parse(script_content)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'input':
+                return "taking input from the user is restricted in this sandbox environment"
+    except SyntaxError as e:
+        return f"SyntaxError: {e}"
 
     try:
-        log(f"[FATAL ERROR]\n{err_text}", LogColors.RED)
-    except Exception:
-        pass
+        process = subprocess.Popen(
+            [sys.executable, "-c", script_content],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=max_runtime)
+        except subprocess.TimeoutExpired:
+            try:
+                parent = psutil.Process(process.pid)
+                parent.kill()
+                psutil.wait_procs([parent], timeout=5)
+            except psutil.NoSuchProcess:
+                pass
+            return "Error: Script timed out."
 
-    ctypes.windll.user32.MessageBoxW(
-        0, 
-        err_text, 
-        "LUCY - Unhandled Fatal Exception", 
-        0x10
-    )
-    sys.exit(1)
+        if process.returncode != 0:
+            return stderr.strip() if stderr.strip() else f"Process failed with return code {process.returncode}"
 
-sys.excepthook = show_fatal_error
+        combined_output = f"{stdout}{stderr}".strip()
+        return combined_output if combined_output else "Could you verify if that worked? I can't tell since there's no output."
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-icon_path = os.path.join(BASE_DIR, "Lucy-fonts", "microphone-solid-gray.png")
-font_path = os.path.join(BASE_DIR, "Lucy-fonts", "GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf")
-
-# Safe image fallback handling for test environments
-try:
-    pil_img = Image.open(icon_path)
-    mic_icon = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(20, 20))
-except Exception:
-    pil_img = Image.new('RGBA', (20, 20), (128, 128, 128, 255))
-    mic_icon = None
-
-
-def load_local_font():
-    """Dynamically loads a .ttf font into the Windows session memory."""
-    FR_PRIVATE = 0x10
-    ctypes.windll.gdi32.AddFontResourceExW(font_path, FR_PRIVATE, 0)
-
-
-try:
-    load_local_font()
-except Exception as e:
-    log(f"[WARNING] Could not load font: {e}", LogColors.YELLOW)
-
-ctk.set_appearance_mode("Dark")
-
-# ---------------------------------------------------------
-# MAIN APPLICATION WINDOW
-# ---------------------------------------------------------
-app = ctk.CTk()
-app.title("LUCY")
-app.overrideredirect(True)
-
-# Chroma key transparent color for rounded edges
-TRANSPARENT_COLOR = "#000001"
-DARK_BG_COLOR = "#1e1e1e"
-DEFAULT_BORDER_COLOR = "#7E88B1"
-
-app.configure(fg_color=TRANSPARENT_COLOR)
-app.wm_attributes("-transparentcolor", TRANSPARENT_COLOR)
-app.attributes("-topmost", True)
-
-screen_w = app.winfo_screenwidth()
-screen_h = app.winfo_screenheight()
-
-min_w_pct, min_h_pct = 0.20, 0.15
-max_w_px, max_h_px = 500, 400
-
-min_w = int(screen_w * min_w_pct)
-min_h = int(screen_h * min_h_pct)
-
-app_window_width = min(max(screen_w, min_w), max_w_px)
-base_window_height = 50
-current_app_h = base_window_height
-
-pos_x = int(screen_w - app_window_width - 20)
-pos_y = 40
-
-app.geometry(f"{app_window_width}x{base_window_height}+{pos_x}+{pos_y}")
-
-# Global registry to manage open notification windows
-active_notifications = []
-
-def reposition_all_notifications():
-    """Adjusts position of all open notification windows beneath main window."""
-    gap = 8
-    accumulated_y = pos_y + current_app_h + gap
-
-    for notif_win in list(active_notifications):
-        if notif_win.winfo_exists():
-            h = notif_win._win_height
-            notif_win.geometry(f"{app_window_width}x{h}+{pos_x}+{accumulated_y}")
-            accumulated_y += h + gap
-        else:
-            active_notifications.remove(notif_win)
-
-
-# ---------------------------------------------------------
-# SYSTEM TRAY SETUP
-# ---------------------------------------------------------
-tray_icon = None
-def on_tray_toggle(icon, item):
-    """Safely toggles window visibility from system tray menu."""
-    app.after(0, lambda: toggle_window(app_handle=app, input_entry=textbox))
-
-def on_tray_exit(icon, item):
-    """Clean exit triggered from system tray context menu."""
-    icon.stop()
-    app.after(0, handle_cleanup)
-
-def setup_system_tray():
-    global tray_icon
-    
-    menu = pystray.Menu(
-        item("Show/Hide LUCY", on_tray_toggle, default=True),
-        pystray.Menu.SEPARATOR,
-        item("Exit", on_tray_exit)
-    )
-    
-    tray_icon = pystray.Icon("LUCY", pil_img, "LUCY Assistant", menu)
-    tray_icon.run()
-
-tray_thread = threading.Thread(target=setup_system_tray, daemon=True)
-tray_thread.start()
-
-def handle_cleanup():
-    global tray_icon
+def connect_to_LLM(p, endpoint_url):
+    log(f"Connecting to Gemini at {endpoint_url}...", LogColors.YELLOW)
     try:
-        log("Cleaning up...", LogColors.GREEN)
-        if tray_icon is not None:
-            tray_icon.stop()
-        app.destroy()
+        browser = p.chromium.connect_over_cdp(endpoint_url, no_defaults=True)
     except Exception:
-        pass
-    sys.exit(0)
+        chrome_state = launch_lucy_chrome(preferred_port=Constants.PORT)
+        endpoint_url = chrome_state["url"]
+        browser = p.chromium.connect_over_cdp(endpoint_url, no_defaults=True)
 
+    context = browser.contexts[0]
+    chat_page = None
+    for page in context.pages:
+        if page.url.startswith(llm_url):
+            chat_page = page
+            break
 
-signal.signal(signal.SIGINT, lambda sig, frame: handle_cleanup())
+    if chat_page is None:
+        chat_page = context.new_page()
+        chat_page.goto(llm_url, wait_until="domcontentloaded")
+        chat_page.wait_for_timeout(2000)
 
+    log(f"Connected to {LLM_SELECTED}.", LogColors.GREEN)
+    return {"browser": browser, "context": context, "page": chat_page, "endpoint_url": endpoint_url}
 
-def allow_signals():
-    app.after(500, allow_signals)
-
-
-app.after(500, allow_signals)
-
-# ---------------------------------------------------------
-# VISIBILITY & HOTKEY LOGIC
-# ---------------------------------------------------------
-is_visible = True
-is_initializing = False
-
-def toggle_window(app_handle, input_entry):
-    global is_visible
-    if is_initializing:
-        return
-
-    if is_visible:
-        app_handle.withdraw()
-        for win in active_notifications:
-            if win.winfo_exists():
-                win.withdraw()
-        is_visible = False
+def reconnect(playwright_instance):
+    log("LLM NOT FOUND:", LogColors.RED)
+    if not is_cdp_port_active(Constants.PORT):
+        log("Browser not found. Attempting hard recovery...", LogColors.YELLOW)
+        chrome_state = launch_lucy_chrome(preferred_port=Constants.PORT)
+        state = connect_to_LLM(playwright_instance, chrome_state["url"])
     else:
-        app_handle.deiconify()
-        app_handle.lift()
-        app_handle.focus_force()
-        for win in active_notifications:
-            if win.winfo_exists():
-                win.deiconify()
-                win.lift()
-        input_entry.focus()
-        is_visible = True
+        log("LLM context not found. Attempting soft recovery...", LogColors.YELLOW)
+        state = connect_to_LLM(playwright_instance, f"http://127.0.0.1:{Constants.PORT}")
+
+    if not state:
+        log("Recovery failed. Please restart the application.", LogColors.RED)
+        sys.exit(1)
+    return state
+
+def is_generating(page):
+    return STOP_RESPONSE_BUTTON(page).is_visible()
+
+def wait_for_ready(page):
+    while is_generating(page):
+        time.sleep(0.8)
+
+
+
+def send_request(page, request):
+    wait_for_ready(page)
+    composer = COMPOSER(page)
+    composer.wait_for(state="visible", timeout=30000)
+    composer.focus()
+
+    # Force set text via evaluate if normal fill fails or leaves text
+    composer.evaluate(f"""el => {{
+        el.focus();
+        if (el.isContentEditable) {{
+            el.innerHTML = '<p>' + {json.dumps(request)} + '</p>';
+        }} else {{
+            el.value = {json.dumps(request)};
+        }}
+        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+    }}""")
+
+    button = SEND_BUTTON(page)
+    button.wait_for(state="visible", timeout=30000)
+    try:
+        button.click(timeout=3000)
+    except Exception:
+        button.evaluate("btn => btn.click()")
+
+    # Force clear/submit via Enter instead of hard failing on to_be_empty
+    try:
+        expect(composer, "Failed to submit request via UI.").to_be_empty(timeout=3000)
+    except AssertionError:
+        composer.press("Enter")
+        # Force clear via JS if it's still stubborn so the next prompt loop won't break
+        composer.evaluate("""el => {
+            if (el.isContentEditable) {
+                el.innerHTML = '<p><br></p>';
+            } else {
+                el.value = '';
+            }
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""")
+    return True
+
+def extracted_code(page):
+    wait_for_ready(page)
+    turns = RESPONSE_TURNS(page)
+    if turns.count() == 0:
+        raise RuntimeError("You forgot to respond.")
+
+    newest = turns.nth(turns.count() - 1)
+    blocks = PRIMARY_CODE_BLOCKS(newest)
+    if blocks.count() == 0:
+        blocks = FALLBACK_CODE_BLOCKS(newest)
+        if blocks.count() == 0:
+            if Constants.MAGIC_STOP_WORD in newest.inner_html().lower():
+                return Constants.MAGIC_STOP_WORD
+
+    if blocks.count() > 1:
+        raise RuntimeError("Just give me 1 code block.")
+
+    return blocks.first.inner_text(timeout=30000).strip()
+
+task_queue = queue.Queue()
 
 
 # ---------------------------------------------------------
-# DYNAMIC RESIZING & LOGGING
+# BACKGROUND WORKER LOOP (MERGED ENGINE)
 # ---------------------------------------------------------
-BASE_INPUT_HEIGHT = 45
-PLACEHOLDER = "Ask Lucy..."
-COLOR_PLACEHOLDER = ("#808080", "#a0a0a0")
-COLOR_TEXT = ("#1a1a1a", "#ffffff")
+def llm_worker_loop(gui):
+    try:
+        chrome_state = launch_lucy_chrome(preferred_port=Constants.PORT)
 
-def on_input_change(event=None):
-    global current_app_h
-    raw_text = textbox.get("1.0", "end-1c")
+        endpoint_url = chrome_state["url"]
 
-    if not raw_text.strip() or raw_text == PLACEHOLDER or is_initializing:
-        current_app_h = base_window_height
-    else:
-        lines = raw_text.split("\n")
-        chars_per_line = 34
-        total_effective_lines = 0
-
-        for line in lines:
-            total_effective_lines += max(
-                1, (len(line) + chars_per_line - 1) // chars_per_line
-            )
-
-        calculated_height = base_window_height + (total_effective_lines - 1) * 22
-        current_app_h = min(max(calculated_height, base_window_height), max_h_px)
-
-    app.geometry(f"{app_window_width}x{current_app_h}+{pos_x}+{pos_y}")
-    reposition_all_notifications()
-
-
-# ---------------------------------------------------------
-# FOCUS LOGIC
-# ---------------------------------------------------------
-def on_focus_in(event):
-    if is_initializing:
+    except Exception as e:
+        log(f"Failed to init Chrome: {e}", LogColors.RED)
+        gui.post("startup_failed", str(e))
         return
-    if textbox.get("1.0", "end-1c") == PLACEHOLDER:
-        textbox.delete("1.0", "end")
-        textbox.configure(text_color=COLOR_TEXT)
 
-
-def on_focus_out(event):
-    if is_initializing:
+    if not is_cdp_port_active(Constants.PORT):
+        log("Browser unreachable. Exiting worker thread.", LogColors.RED)
+        gui.post("startup_failed", "Chrome is unreachable.")
         return
-    if not textbox.get("1.0", "end-1c").strip():
-        textbox.insert("1.0", PLACEHOLDER)
-        textbox.configure(text_color=COLOR_PLACEHOLDER)
-        on_input_change()
+
+    with sync_playwright() as p:
+        state = connect_to_LLM(p, endpoint_url)
+        usage_page = state["context"].new_page()
+
+        check_usage_and_warn(usage_page)
+
+        async_logger = AsyncLLMLogger(ASYNC_LOG_FILE)
+        async_logger.start()
+        gui.post("ready")
+
+        while True:
+            # Wait for user input from UI queue
+            initial_request = task_queue.get()
+            if initial_request is None:
+                async_logger.stop()
+                break
+
+            # Mark state as busy and disable UI elements
+            gui.post("set_busy", True)
+
+            request = f"{Constants.PROMPT_PREFIX}{initial_request}{Constants.PROMPT_SUFFIX}"
+            prompts_sent_in_current_chat = 0
+            latest_code = ""
+            latest_output = ""
+
+            task_id = object()
+            title_summary = initial_request[:30] + "..." if len(initial_request) > 30 else initial_request
+            gui.post("show_notification", task_id, title_summary, "Incoming...")
+            completed = False
+
+            try:
+                while True:
+                    try:
+                        if not is_cdp_port_active(Constants.PORT):
+                            state = reconnect(p)
+
+                        if not request.strip():
+                            request = "No execution output was captured. Try again."
+
+                        check_usage_and_warn(usage_page)
+
+                        # ---------------------------------------------------------
+                        # 1. ROLLOVER CHECK BEFORE SENDING
+                        # ---------------------------------------------------------
+                        if prompts_sent_in_current_chat >= MAX_PROMPTS_PER_CHAT:
+                            new_page, prompts_sent_in_current_chat = open_fresh_llm_chat(
+                                state,
+                                async_logger,
+                                initial_request,
+                                latest_code,
+                                latest_output,
+                            )
+                            state["page"] = new_page
+                            log("Started fresh Gemini chat and transferred latest state.", LogColors.YELLOW)
+                            # open_fresh_llm_chat sends the rollover prompt
+                        else:
+                            # Normal prompt dispatch
+                            send_request(state["page"], request)
+                            prompts_sent_in_current_chat += 1
+                            async_logger.log(
+                                "prompt_sent",
+                                prompt_number=prompts_sent_in_current_chat,
+                                rollover=False,
+                                prompt=request,
+                            )
+                            log(f"Attempt ({prompts_sent_in_current_chat}/{MAX_PROMPTS_PER_CHAT}).", LogColors.GREEN)
+
+                        # ---------------------------------------------------------
+                        # 2. SINGLE UNIFIED EXTRACTION & EXECUTION
+                        # ---------------------------------------------------------
+                        # wait for the page to process the request before extracting the latest code since its causing a race condition by pre fetching the last response and ignoring THIS prompt.
+                        state["page"].wait_for_timeout(2000)
+
+                        response = extracted_code(state["page"])
+
+                        # Keep the last code visible when the final reply is only the stop marker.
+                        if response.lower().strip() != Constants.MAGIC_STOP_WORD.lower().strip():
+                            gui.post("update_notification", task_id, response)
 
 
-def is_event_inside_textbox(event_widget):
-    widget = event_widget
-    while widget is not None:
-        if widget in (textbox, input_container):
-            return True
-        widget = getattr(widget, "master", None)
-    return False
+                        # Execute code
+                        latest_code = response
+                        latest_output = run_python_code(response)
+
+                        async_logger.log(
+                            "code_executed",
+                            prompt_number=prompts_sent_in_current_chat,
+                            code=latest_code,
+                            output=latest_output,
+                        )
 
 
-# ---------------------------------------------------------
-# UI LAYOUT - MAIN WINDOW
-# ---------------------------------------------------------
-main_container = ctk.CTkFrame(
-    master=app,
-    fg_color=TRANSPARENT_COLOR,
-    border_width=0,
-)
-main_container.pack(fill="both", expand=True)
+                        # Check for completion condition
+                        if Constants.MAGIC_STOP_WORD in response.lower().strip():
+                            async_logger.log(
+                                "completion",
+                                prompt_number=prompts_sent_in_current_chat,
+                                code=response,
+                                output="Job finished.",
+                            )
+                            log("Job Finished. Idling...", LogColors.GRAY)
+                            completed = True
+                            break
 
-input_container = ctk.CTkFrame(
-    main_container,
-    corner_radius=16,
-    fg_color=DARK_BG_COLOR,
-    border_width=2,
-    border_color=DEFAULT_BORDER_COLOR
-)
-input_container.pack(fill="both", expand=True, padx=0, pady=0)
+                        # Set output as next prompt request
+                        request = latest_output
+                        time.sleep(4)
+                        continue
 
-input_container.grid_columnconfigure(0, weight=1)
-input_container.grid_columnconfigure(1, weight=0)
-input_container.grid_rowconfigure(0, weight=1)
-
-textbox = ctk.CTkTextbox(
-    input_container,
-    font=("Google Sans Flex", 16),
-    wrap="word",
-    fg_color="transparent",
-    border_width=0,
-    activate_scrollbars=True,
-    scrollbar_button_color="#d1d1d1",
-    scrollbar_button_hover_color="#b5b5b5",
-)
-textbox.grid(row=0, column=0, sticky="nsew", padx=(10, 2), pady=4)
-
-textbox.insert("1.0", PLACEHOLDER)
-textbox.configure(text_color=COLOR_PLACEHOLDER)
-
-textbox.bind("<FocusIn>", on_focus_in)
-textbox.bind("<FocusOut>", on_focus_out)
-textbox.bind(
-    "<<Modified>>",
-    lambda e: (
-        textbox.edit_modified(False),
-        app.after_idle(on_input_change),
-    )[-1],
-)
+                    except PlaywrightError as e:
+                        if "closed" in str(e).lower():
+                            try:
+                                state = reconnect(p)
+                                request = f"{Constants.PROMPT_PREFIX}{initial_request}{Constants.PROMPT_SUFFIX}"
+                            except Exception as fatal:
+                                log(f"Recovery failed: {fatal}", LogColors.RED)
+                        else:
+                            request = f"Playwright Engine Error: {e}"
+                    except Exception as e:
+                        try:
+                            async_logger.log("error", error=str(e), prompt_number=prompts_sent_in_current_chat)
+                        except Exception:
+                            pass
+                        log(f"Loop error caught: {e}", LogColors.RED)
+                        request = str(e)
+                        time.sleep(1)
+            finally:
+                # Re-enable state and inputs when job finishes or terminates
+                gui.post("finish_notification", task_id, "Completed" if completed else "Failed")
+                gui.post("set_busy", False)
 
 
-def trigger_mic_action():
-    if is_initializing:
-        return
-    log("Microphone clicked...", LogColors.GREEN)
+def main():
+    def cleanup():
+        log("Cleaning up and shutting down browser instance...", LogColors.YELLOW)
+        task_queue.put(None)
+        try:
+            kill_cdp_browser()
+        except Exception as exc:
+            log(f"Cleanup failed: {exc}", LogColors.YELLOW)
 
 
-btn_mic = ctk.CTkButton(
-    input_container,
-    text="",
-    image=mic_icon,
-    width=0,
-    height=0,
-    hover=False,
-    fg_color="transparent",
-    command=trigger_mic_action,
-    border_spacing=8,
-)
-btn_mic.grid(row=0, column=1, sticky="ne", padx=(2, 6), pady=6)
+    gui = LucyGUI(on_submit=task_queue.put, on_close=cleanup)
+
+    def report_fatal(exc_type, exc_value, exc_tb):
+        error = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        log(f"[FATAL ERROR]\n{error}", LogColors.RED)
+        gui.post("startup_failed", error)
+
+    sys.excepthook = report_fatal
+
+    def run_worker():
+        try:
+            llm_worker_loop(gui)
+        except BaseException:
+            report_fatal(*sys.exc_info())
+
+    signal.signal(signal.SIGINT, lambda sig, frame: gui.post("close"))
+    worker_thread = threading.Thread(target=run_worker, name="Lucy-Worker", daemon=True)
+    worker_thread.start()
+    gui.run()
 
 
-# ---------------------------------------------------------
-# INITIALIZATION LOCK & RIPPLE ANIMATION
-# ---------------------------------------------------------
-def initialize_lucy(seconds=4):
-    """Blocks UI input for `seconds`, playing a border ripple & loading dots animation."""
-    global is_initializing
-    is_initializing = True
-
-    # Lock interaction controls
-    btn_mic.configure(state="disabled")
-    textbox.configure(state="normal")
-    textbox.delete("1.0", "end")
-    textbox.insert("1.0", "Initializing Lucy...")
-    textbox.configure(text_color=COLOR_PLACEHOLDER, state="disabled")
-
-    ripple_colors = ["#7E88B1", "#8EA0E3", "#9BB5FF", "#8EA0E3"]
-    total_steps = int(seconds * 10)  # 10 frames per second
-    step = 0
-
-    def animate():
-        nonlocal step
-        if step < total_steps:
-            # Animate text dots
-            dot_count = (step % 4)
-            dots = ">" * dot_count
-            textbox.configure(state="normal")
-            textbox.delete("1.0", "end")
-            textbox.insert("1.0", f"Initializing Lucy{dots}")
-            textbox.configure(state="disabled")
-
-            # Animate border ripple
-            color = ripple_colors[step % len(ripple_colors)]
-            input_container.configure(border_color=color)
-            input_container.configure(border_color=color)
-            textbox.configure(text_color=color)
-            
-
-            step += 1
-            app.after(150, animate)
-        else:
-            # Restore state after initialization finishes
-            finish_initialization()
-
-    def finish_initialization():
-        global is_initializing
-        is_initializing = False
-
-        # Reset container border & restore textbox
-        input_container.configure(border_color=DEFAULT_BORDER_COLOR)
-        textbox.configure(state="normal")
-        textbox.delete("1.0", "end")
-        textbox.insert("1.0", PLACEHOLDER)
-        textbox.configure(text_color=COLOR_PLACEHOLDER)
-
-        # Re-enable mic button
-        btn_mic.configure(state="normal")
-
-    animate()
-
-
-# ---------------------------------------------------------
-# DYNAMIC NOTIFICATION WINDOW CREATOR
-# ---------------------------------------------------------
-def show_notification_window(title: str, text: str, notif_h: int = 150):
-    """Creates a standalone top-level notification popup positioned under the main window."""
-    notif_win = ctk.CTkToplevel(app)
-    notif_win.title("LUCY Notification")
-    notif_win.overrideredirect(True)
-    notif_win.configure(fg_color=TRANSPARENT_COLOR)
-    notif_win.wm_attributes("-transparentcolor", TRANSPARENT_COLOR)
-    notif_win.attributes("-topmost", True)
-    notif_win._win_height = notif_h
-
-    # Container setup
-    notif_main = ctk.CTkFrame(master=notif_win, fg_color=TRANSPARENT_COLOR, border_width=0)
-    notif_main.pack(fill="both", expand=True)
-
-    notif_box = ctk.CTkFrame(
-        notif_main,
-        corner_radius=16,
-        fg_color=DARK_BG_COLOR,
-        border_width=1,
-        border_color="#7E88B1"
-    )
-    notif_box.pack(fill="both", expand=True, padx=0, pady=0)
-
-    # Title Bar Header with Close Button
-    header_frame = ctk.CTkFrame(notif_box, fg_color="transparent")
-    header_frame.pack(fill="x", padx=12, pady=(8, 2))
-
-    title_label = ctk.CTkLabel(
-        header_frame,
-        text=title,
-        font=("Google Sans Flex", 14, "bold"),
-        text_color="#808080",
-        anchor="w"
-    )
-    title_label.pack(side="left", fill="x", expand=True)
-
-    def close_popup():
-        if notif_win in active_notifications:
-            active_notifications.remove(notif_win)
-        notif_win.destroy()
-        reposition_all_notifications()
-
-    btn_close = ctk.CTkButton(
-        header_frame,
-        text="✕",
-        width=18,
-        height=18,
-        corner_radius=9,
-        fg_color="transparent",
-        hover_color="#333333",
-        text_color="#808080",
-        font=("Arial", 11, "bold"),
-        command=close_popup
-    )
-    btn_close.pack(side="right")
-
-    # Divider
-    divider = ctk.CTkFrame(notif_box, height=1, fg_color="#7E88B1", border_width=0)
-    divider.pack(fill="x", padx=10, pady=(0, 4))
-
-    # Text content
-    notif_textbox = ctk.CTkTextbox(
-        notif_box,
-        font=("Google Sans Flex", 13),
-        wrap="word",
-        fg_color="transparent",
-        border_width=0,
-        text_color="#d1d1d1",
-        activate_scrollbars=True,
-        scrollbar_button_color="#d1d1d1",
-        scrollbar_button_hover_color="#b5b5b5",
-    )
-    notif_textbox.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-    notif_textbox.insert("1.0", text)
-
-    # Register and position
-    active_notifications.append(notif_win)
-    reposition_all_notifications()
-
-    if not is_visible:
-        notif_win.withdraw()
-
-    return notif_win
-
-
-def clear_focus_on_bg(event):
-    if not is_event_inside_textbox(event.widget) and not is_initializing:
-        app.focus_set()
-
-
-app.bind("<Button-1>", clear_focus_on_bg, add="+")
-main_container.bind("<Button-1>", clear_focus_on_bg, add="+")
-app.bind(
-    "<Escape>",
-    lambda event: toggle_window(app_handle=app, input_entry=input_container),
-)
-
-keyboard.add_hotkey("ctrl+space", lambda: toggle_window(app_handle=app, input_entry=textbox))
-
-# Schedule initialization overlay to execute right after main window renders (default 4 seconds)
-app.after(100, lambda: initialize_lucy(seconds=2))
-
-app.mainloop()
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,4 @@
-import re
-
+# NOTE: This will be rewritten to allow for more flexibility across multiple different llms both local and cloud based.
 def get_gemini_usage(page) -> dict:
     if not "gemini.google.com/usage" in page.url:
         page.goto("https://gemini.google.com/usage")

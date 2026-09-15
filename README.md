@@ -1,3 +1,5 @@
+**Incomplete document...WIP**
+
 LUCY ARCHITECTURE DESIGN CHOICES:
 
 
@@ -20,19 +22,10 @@ Ever-growing library of short, purposeful shell commands that include using LLMs
 * Needs a highly flexible searching function that returns the most relevant command(s) for the user's prompt.
 * Needs a way to correctly order/sort these search results to execute not only a single command but most likely and most of the time, chain together  multiple commands.
 
-
-
-
-
-
-
 **ADDTIONAL NOTES:**
 
 * Needs a decent feedback system that returns which function failed, what kind of error, at which line, etc. along with the system's current state and state at the time of the error's occurrence.
 * text is better than voice interaction. There should be two modes Text and Voice mode with text being priority as per user feedback and research.
-
-
-
 
 
 Toolkit:
@@ -44,6 +37,3 @@ Media playback: mainly you tube play any video (includes music cuz its on youtub
 Raylab to render 2D and 3D graphics for basic visualization.
 
 Windows built in TTS to speak out all responses predefined ones + llm parsed responses.
-
-Incomplete document...work in progress.
-
